@@ -9,11 +9,19 @@ For visitors who have arrived at this repository as players rather than as contr
 The merge itself is implemented as a deliberate sequence of four stages, summarised here and elaborated in the sections that follow.
 
 1. **Parse.** Both the EVO `.ing` script and the corresponding XSeed `.ing` script are parsed into an abstract syntax tree by the `ingert-syntax` library. Working at the AST level, rather than at the level of raw text, is essential because dialogue calls interleave text with non-text arguments (character IDs, voice cues, portrait tags), and a regex-based approach would consequently risk clobbering the very voice metadata which the merge is intended to preserve.
-2. **Index.** For each function in the XSeed file, an index is constructed which maps a dialogue *anchor key* (broadly, who is speaking, with which portrait, and where applicable which voice line) to the localised text that XSeed associates with that anchor. The anchor is the lookup mechanism by which an EVO dialogue line subsequently finds its XSeed counterpart.
-3. **Walk and rewrite.** The EVO file is walked function-by-function. Each dialogue syscall is classified, its anchor is looked up in the XSeed index, and where a match is found, the EVO text is replaced with the XSeed text. Voice IDs, character IDs, portrait tags, and any other non-text arguments survive unchanged. Lines that the EVO mod adds but XSeed does not contain (typically those backing newly voiced audio) are left byte-identical, thereby ensuring that the EVO mod's contributions are preserved.
-4. **Print.** The transformed EVO AST is printed back to `.ing` and written under `output/`. The merge tool stops there; recompilation to `.dat` is intentionally a separate step, handled by `scripts/ing2dat.py` invoking the Ingert binary.
+2. **Index.** For each function in the XSeed file, an index is constructed which maps a dialogue *anchor key* (broadly, who is speaking, with which portrait, and where applicable which voice line) to the localised text that XSeed associates with that anchor. The anchor is the lookup mechanism by which an EVO dialogue line subsequently finds its XSeed counterpart. The index is moreover partitioned by `Site` (the body block versus the called-table metadata block), with the consequence that the body walk and the called-table walk each consume an independent counter sequence.
+3. **Walk and rewrite.** The EVO file is walked function-by-function. Each dialogue syscall is classified, its anchor is looked up in the XSeed index, and where a match is found, the EVO text is replaced with the XSeed text. Voice IDs, character IDs, portrait tags, and any other non-text arguments survive unchanged. AST-level cross-checks (`compare-original`, `compare-xseed`) furthermore confirm that EVO introduces no new dialogue lines relative to either the original GungHo decompile or to XSeed; the mod's only structural departures from `original/` are voice-ID upgrades on existing lines, and a single function whose body Ingert cannot decompile to a `Tree`. Both cases are detected and handled explicitly by the swap layer, as described under **Mod-specific divergences** below.
+4. **Print.** The transformed EVO AST is printed back to `.ing` and written under `output/`. The merge tool stops there; recompilation to `.dat` is intentionally a separate step, handled by `scripts/ing2dat.py` invoking the Ingert binary. As a side effect of the directory-mode run, an audit directory `output/_audit/` is additionally written, recording any unmatched calls, overflow reuses, or body substitutions encountered during the swap.
 
 The pipeline is idempotent by design: running the tool a second time against its own output produces a byte-identical result, which consequently makes a re-run after a partial change always safe. While the implementation that follows leans on AST-specific terminology, the underlying intent throughout is the four-stage shape described above.
+
+### Mod-specific divergences
+
+What the EVO Voice mod actually changes relative to the original GungHo decompile is narrow, and worth enumerating up front so that the implementation choices which follow can be read against the right backdrop. Three categories exist, and the merge handles all three end-to-end.
+
+1. **Voice-ID insertions on `[5,0]` and `[5,6]` portrait calls.** EVO inserts an `11, V` pair between `char_id` and the portrait tag for many lines (for example, Joshua `60589` or Estelle `60593`). These insertions do not alter the anchor (the portrait tag is the key), with the consequence that the standard `Portrait{char_id, tag}` lookup matches XSeed's voiced and unvoiced variants alike, and the merge preserves EVO's `11, V` verbatim.
+2. **Anchor-shape upgrades on `[5,8]` calls.** EVO occasionally promotes a `[5,8]-letter` line into `[5,8]-voiced` (by inserting `11, V` after the `19, 13` prefix), or promotes a `[5,8]-plain` line into a `[5,8]-voiced-plain` variant (by inserting `11, V` after the `65535` prefix). Because the upgrade changes which anchor variant the classifier returns, a direct key lookup against XSeed (which still uses the unvoiced shape) fails. Two mechanisms consequently close the gap. First, the classifier treats `[5,8]-voiced-plain` as `AnchorKey::Plain` (the same anchor as the unvoiced shape, but with a larger `prefix_len`), so that it matches XSeed's `Plain` runs positionally. Secondly, the swap visitor falls back from `AnchorKey::Voiced(V)` to `AnchorKey::Letter` when the direct lookup yields no runs, sharing the per-site `Letter` counter so that multiple upgraded `Voiced` calls advance through XSeed's `Letter` runs in source order. Three voice IDs in the current corpus exercise this path: 97064 (VoicedPlain), and 97068 / 97069 (Letter→Voiced).
+3. **`Body::Asm` functions.** Ingert's tree-mode decompiler cannot always recover a `Body::Tree` from the bytecode; in the present corpus, one EVO function (`mp3010_01.ing:QS300_01_00`) consequently decompiles to `Body::Asm`, an opaque sequence of raw bytecode instructions. Because the body walker only touches `Body::Tree`, without further action that function's body would silently retain its GungHo text. The swap layer therefore detects the (`EVO=Asm`, `XSeed=Tree`) configuration and clones XSeed's body into EVO outright, gated on `evo_calls_have_voice_ids` returning `false` (i.e. EVO has added no voice IDs in that function, with the consequence that the substitution loses no EVO-specific data). The event is logged to `output/_audit/body_substitutions.tsv`.
 
 ## Workspace layout
 
@@ -32,17 +40,20 @@ sora1stchapter/
 │   └── prune.py               # drop corpus files with no XSeed counterpart
 └── sora-remake-merge/
     ├── src/
-    │   ├── lib.rs             # public surface
-    │   ├── main.rs            # clap CLI, dir walking, file I/O
-    │   ├── io.rs              # parse_ing / print_ing wrappers
-    │   ├── anchor.rs          # AnchorKey + classify_syscall_{expr,call}
-    │   ├── text_run.rs        # extract / build / replace `Vec<String>` runs
-    │   ├── walker.rs          # AST walker + Visitor trait (body and called)
-    │   └── swap.rs            # swap_scena, per-function index, SwapVisitor
-    └── tests/e2e.rs           # roundtrip / corpus-based integration tests
+    │   ├── lib.rs                       # public surface
+    │   ├── main.rs                      # clap CLI, dir walking, file I/O, audit TSV writers
+    │   ├── io.rs                        # parse_ing / print_ing wrappers
+    │   ├── anchor.rs                    # AnchorKey + classify_syscall_{expr,call}
+    │   ├── text_run.rs                  # extract / build / replace TextRun = Vec<TextChunk>
+    │   ├── walker.rs                    # AST walker + Visitor trait (body and called)
+    │   ├── swap.rs                      # swap_scena, per-(Site, AnchorKey) index, SwapVisitor
+    │   └── bin/
+    │       ├── compare-original.rs      # EVO body vs `resources/original/` AST diff
+    │       └── compare-xseed.rs         # EVO body vs `resources/xseed-restoration/` AST diff
+    └── tests/e2e.rs                     # roundtrip / corpus-based integration tests
 ```
 
-The merge crate is structured as a single binary which re-exports its library, thereby allowing integration tests to drive `swap_scena` directly without spawning a separate process.
+The merge crate exposes a library plus three binaries: `sora-remake-merge` (the merge tool itself) and the two read-only analysis binaries under `src/bin/`. Integration tests drive `swap_scena` directly through the library surface without spawning a separate process.
 
 ## High-level data flow
 
@@ -52,7 +63,7 @@ flowchart LR
     XS[".ing<br/>(XSeed)"] --> P2[ingert-syntax::parse]
     P1 --> EAST[Scena AST<br/>EVO]
     P2 --> XAST[Scena AST<br/>XSeed]
-    XAST --> IDX["Per-function index<br/>HashMap&lt;AnchorKey, Vec&lt;TextRun&gt;&gt;"]
+    XAST --> IDX["Per-function index<br/>HashMap&lt;(Site, AnchorKey), Vec&lt;TextRun&gt;&gt;"]
     EAST --> W[Walk &amp; rewrite<br/>syscalls]
     IDX --> W
     W --> EAST2[Scena AST<br/>EVO + XSeed text]
@@ -132,7 +143,7 @@ Two parallel argument families carry text:
 
 The two are structurally equivalent for our purposes (same opcode space, same argument layout), although they are built from different ingert types (`scena::Value` versus `scp::Value`). The merge tool consequently walks both with identical logic.
 
-Since `dat2ing.py` always invokes `ingert.exe --mode tree`, the `Body::Flat` and `Body::Asm` variants, along with `Called::Merged`, are corner cases that the swap layer handles defensively but rarely encounters in practice.
+Since `dat2ing.py` always invokes `ingert.exe --mode tree`, the `Body::Flat` and `Body::Asm` variants, along with `Called::Merged`, are corner cases that the swap layer handles defensively. They are rare in practice but not entirely absent: at present, exactly one function (`mp3010_01.ing:QS300_01_00`) decompiles to `Body::Asm`, and the swap layer consequently compensates by cloning XSeed's `Body::Tree` in its place. The full mechanics are described under **`Called::Merged` and non-`Tree` bodies** below.
 
 ## Module responsibilities
 
@@ -172,22 +183,37 @@ flowchart TD
     G -- yes --> V["Voiced(V)<br/>prefix_len = 5"]
     G -- no --> H{args 1..3 == 19, 13<br/>and args 3 is String?}
     H -- yes --> L["Letter<br/>prefix_len = 3"]
-    H -- no --> I{args 1 is String?}
+    H -- no --> VP{args 1..3 == 11, V<br/>and args 3 is String?}
+    VP -- yes --> PLV["Plain<br/>prefix_len = 3<br/>(VoicedPlain shape)"]
+    VP -- no --> I{args 1 is String?}
     I -- yes --> PL["Plain<br/>prefix_len = 1"]
     I -- no --> SKIP
 ```
 
+The `[5,8]-voiced-plain` branch (`args[1..3] == 11, V`) emits the **same** `AnchorKey::Plain` that the regular Plain shape emits, but with `prefix_len = 3` rather than `1`. This consequently allows EVO's voiced song lyrics to anchor positionally against XSeed's pre-existing `Plain` runs, while at the same time protecting the `11, V` voice marker from being clobbered by the text run during the swap.
+
 `prefix_len` is the only piece of information the swap layer requires concerning the call's prefix. Everything preceding that index is untouchable; everything from that index onward constitutes the text run.
 
-### `text_run.rs`: `Vec<String>` ↔ args
+### `text_run.rs`: `TextRun` ↔ args
 
-Three operations, each implemented twice (an Expr-flavour and a CallArg-flavour):
+```rust
+pub enum TextChunk {
+    Str(String),
+    Newline,
+}
 
-- `extract_run_{expr,call}(&[…]) -> Option<Vec<String>>`: peels alternating `String` and `Int(10)` arguments. It returns `None` on a shape mismatch, which signals that the call is not a text run and should be left alone. Line annotations on string arguments are dropped.
-- `build_run_{expr,call}(&Vec<String>) -> Vec<…>`: the inverse operation. It joins strings with `Int(10)`, and importantly **never** stamps `Line` annotations on the new arguments, thereby ensuring that injected XSeed strings come out clean.
-- `replace_run_{expr,call}(&mut Vec<…>, prefix_len, &new_run)`: truncates the argument list after the prefix and appends the rebuilt run.
+pub type TextRun = Vec<TextChunk>;
+```
 
-The asymmetry (extract drops annotations, build does not add them) is deliberate. It thereby guarantees idempotency: parse → transform → print → parse → transform yields the same AST.
+A `TextRun` is a sequence of `Str` and `Newline` chunks, rather than a `Vec<String>`. The earlier `Vec<String>` representation implicitly assumed that `Int(10)` newlines strictly alternated with strings, an assumption which broke on the (legal, observed) shape where two `String` arguments sit back-to-back with no separating `10`. Storing the actual sequence of chunks verbatim removes that assumption entirely, which is subsequently what allowed the overflow audit to drop from three cases to zero.
+
+Three operations are defined, each implemented twice (an Expr-flavour and a CallArg-flavour):
+
+- `extract_run_{expr,call}(&[…]) -> Option<TextRun>`: peels off any sequence of `String` and `Int(10)` arguments. It returns `None` on a non-text shape, which is the signal to the caller that the call is not a text run and should consequently be left alone. Line annotations on string arguments are dropped.
+- `build_run_{expr,call}(&TextRun) -> Vec<…>`: the inverse operation. It emits one argument per chunk (with no implicit newline insertion), and importantly **never** stamps `Line` annotations on the new arguments, thereby ensuring that injected XSeed strings come out clean.
+- `replace_run_{expr,call}(&mut Vec<…>, prefix_len, &new_run)`: truncates the argument list after the prefix, and appends the rebuilt run.
+
+The asymmetry between extract (which drops annotations) and build (which does not add them) is deliberate. It is what guarantees idempotency: parse → transform → print → parse → transform yields the same AST.
 
 ### `walker.rs`: AST traversal and the `Visitor` trait
 
@@ -198,6 +224,7 @@ pub trait Visitor {
     fn on_syscall(
         &mut self,
         site: Site,
+        line: Option<u16>,
         key: &AnchorKey,
         evo_run: &TextRun,
     ) -> Option<TextRun>;  // Some(new) → swap; None → leave alone
@@ -206,6 +233,8 @@ pub trait Visitor {
 pub fn rewrite_body(stmts: &mut [Stmt], visitor: &mut impl Visitor);
 pub fn rewrite_called(calls: &mut [Call], visitor: &mut impl Visitor);
 ```
+
+The `line` parameter conveys the source-line annotation attached to the syscall expression (where present), with the consequence that audit entries written by `SwapVisitor` can subsequently point back at the EVO line that triggered them. `rewrite_called` passes `None`, since called-table entries do not carry per-call line annotations in the AST.
 
 `rewrite_body` recurses through every `Stmt` variant capable of holding expressions, which includes both branches of `If`, every `Switch` arm, nested `Block`s, `While` bodies, the RHS of `Set`, the payloads of `Return` and `PushVar`, and the argument lists of `Debug` and `Tailcall`. Each `Expr::Syscall` is classified, the trailing run is extracted, and the visitor is consulted on whether to perform a swap. A visitor returning `Some(new)` consequently triggers `args.truncate(prefix_len); args.extend(build_run_expr(&new))`.
 
@@ -218,10 +247,10 @@ The visitor pattern constitutes the seam between *walking* and *swapping*. Tests
 `swap_scena` is the public entry point. It iterates over EVO functions, looks up each by name in the XSeed `Scena`, builds an index from that XSeed function, and runs the visitor over EVO's body and called-table.
 
 ```rust
-type Index = HashMap<AnchorKey, Vec<TextRun>>;
+type Index = HashMap<(Site, AnchorKey), Vec<TextRun>>;
 ```
 
-The index is constructed **per function, rather than per file**. Anchors only collide within the scope of a single function (i.e. the same character speaking with the same portrait), so a per-function map is sufficient and avoids cross-function false matches.
+The index is constructed **per function, rather than per file**, and is furthermore **partitioned by `Site`**, with separate entries for runs collected from XSeed's `Body` walk and from XSeed's `Called` walk. Anchors only collide within the scope of a single function (i.e. the same character speaking with the same portrait), with the consequence that a per-function map is sufficient; the `Site` partition additionally avoids the cross-block aliasing case in which a body-only call would otherwise inherit text from a structurally similar called-only call elsewhere within the same function. An earlier per-function-only (non-site-partitioned) variant was the cause of two unmatched-but-coincidentally-correct outcomes in `LP_CHECKED_BOARD`, which the partitioned variant now resolves correctly.
 
 ```mermaid
 sequenceDiagram
@@ -247,33 +276,40 @@ sequenceDiagram
     Swap-->>CLI: aggregate SwapStats
 ```
 
-#### N-to-M matching
+#### Lookup, fallbacks, and N-to-M matching
 
-The same anchor key frequently appears multiple times within a function, both as a consequence of `calls{} {}` duplication and because of first-visit and revisit branches within the code body. To handle this, `SwapVisitor` maintains a per-`(Site, AnchorKey)` counter and indexes into the `Vec<TextRun>` corresponding to that key:
+The same anchor key frequently appears multiple times within a function, both as a consequence of `calls{} {}` duplication and because of first-visit and revisit branches within the code body. The visitor's lookup is consequently structured as a three-stage process. The primary attempt is a direct hit on `(site, key)`. The first fallback (relevant when the call was found in the called-table) re-attempts the lookup against `(Body, key)`, which covers the case where the called-table metadata block carries a slightly different shape from the body block. The second and final fallback applies when the call is a `[5,8]-voiced` shape with no direct match, in which case the visitor re-attempts the lookup against `AnchorKey::Letter`; this is the EVO Letter→Voiced upgrade path. Once the run-list has been selected by one of these three attempts, a per-`(site, counter_key)` counter walks through the list positionally, as set out in the flowchart below.
 
 ```mermaid
 flowchart TD
-    A[on_syscall called] --> B{key in index?}
-    B -- no --> U[unmatched++<br/>return None]
-    B -- yes --> C["n = counters[(site, key)]"]
+    A[on_syscall called] --> B{"index has<br/>(site, key)?"}
+    B -- yes --> H["runs = index<br/>counter_key = (site, key)"]
+    B -- no --> CC{"site == Called<br/>and (Body, key) in index?"}
+    CC -- yes --> CB["runs = index Body<br/>counter_key = (site, key)"]
+    CC -- no --> VL{"key is Voiced(V)<br/>and (site, Letter) in index?"}
+    VL -- yes --> VLF["runs = index Letter<br/>counter_key = (site, Letter)<br/>voiced_to_letter_fallback++"]
+    VL -- no --> U[unmatched++<br/>return None]
+    H --> C["n = counters[counter_key]"]
+    CB --> C
+    VLF --> C
     C --> D{"runs.get(n) Some?"}
     D -- yes --> E[run = runs n<br/>overflow = false]
     D -- no --> F[run = runs.last<br/>overflow = true<br/>overflow_reuses++]
-    E --> H["counters[(site, key)] = n + 1"]
-    F --> H
-    H --> I{run == evo_run?}
-    I -- yes --> J[no_ops_equal++<br/>return None]
-    I -- no --> K[swaps_applied++<br/>return Some run]
+    E --> J["counters[counter_key] = n + 1"]
+    F --> J
+    J --> I{run == evo_run?}
+    I -- yes --> K[no_ops_equal++<br/>return None]
+    I -- no --> L[swaps_applied++<br/>return Some run]
 ```
 
-Counters are partitioned by `Site` so that the called-table walk and the body walk each receive a fresh sequence; this reflects the fact that the metadata duplicates the body, and the two consequently consume the same XSeed runs in the same order.
+Counters are partitioned by `Site` so that the called-table walk and the body walk each receive a fresh sequence; this reflects the structural reality that the metadata duplicates the body, and that the two consequently consume the same XSeed runs in the same order. The `Voiced → Letter` fallback shares the per-site `Letter` counter, with the consequence that *multiple* EVO Letter→Voiced upgrades within the same function advance through XSeed's `Letter` runs in source order. The two upgrades in `mp1010_04.ing:EV_01_61_00` exercise this directly.
 
-The overflow rule (reuse the last XSeed run when EVO has more occurrences than XSeed) is the deliberate concession to the calls/body × first-visit/revisit multiplicity described in `AGENTS.md`. While this rule may be less precise than a strict one-to-one mapping, in practice it correctly handles the duplication patterns observed across the corpus.
+The overflow rule (reuse the last XSeed run when EVO has more occurrences than XSeed for a given anchor) is the deliberate concession to the calls/body × first-visit/revisit multiplicity described in `AGENTS.md`. While this rule is less precise than a strict one-to-one mapping in principle, in practice it correctly handles the duplication patterns observed across the corpus, and as of the most recent run no overflow reuses are recorded at all.
 
 #### `Called::Merged` and non-`Tree` bodies
 
 - `Called::Merged(_)`: the called-table is `dup`-equivalent to the body. The body walk has already covered it, so the swap layer skips the called walk in this case.
-- `Body::Flat(_)` and `Body::Asm(_)`: these never appear in tree-mode decompiles, but should they ever do so, the swap layer leaves the body alone and indexes from the called-table instead, thereby ensuring the function is not silently dropped.
+- `Body::Flat(_)` and `Body::Asm(_)` paired with `XSeed=Tree`: the body walker only touches `Body::Tree`, with the consequence that a non-`Tree` EVO body would otherwise leave that function's runtime text untouched. The swap layer therefore detects the (`EVO=Asm|Flat`, `XSeed=Tree`) configuration and substitutes XSeed's body wholesale, gated on the helper `evo_calls_have_voice_ids` returning `false`. The gate inspects EVO's calls-table and treats the function as "EVO has added voice IDs" if any call carries an explicit `11, V` voice marker. Checking `prefix_len > N` alone is insufficient, principally because some `[5,0]` calls carry additional integer parameters between `char_id` and the portrait tag (for example, `system[5,0](11510, 25, "<#E…>", …)`) which are not voice IDs. The substitution is logged to `output/_audit/body_substitutions.tsv`. Exactly one function in the present corpus exercises this path, namely `mp3010_01.ing:QS300_01_00`.
 
 ### `io.rs`: parser and printer adapters
 
@@ -298,6 +334,8 @@ sora-remake-merge --verbose                             # per-file swap counts
 
 Directory mode walks `--evo` recursively with `walkdir`, filters to `.ing`, mirrors the relative path under `--xseed` and `--out`, and aggregates per-file `SwapStats`. EVO files which lack an XSeed counterpart are skipped (and counted under `files_missing_xseed_skipped`). The tool never mutates inputs.
 
+After a directory run, `main.rs` additionally writes three audit TSVs under `<out>/_audit/`: `unmatched.tsv` (EVO calls for which no XSeed anchor was found, which is empty on a clean run); `overflow.tsv` (EVO occurrences beyond XSeed's run count for a given anchor, where the final XSeed run is consequently reused, which is likewise empty on a clean run); and `body_substitutions.tsv` (functions whose non-`Tree` EVO body was replaced by XSeed's `Tree` body, which contains a single entry on a clean run). The aggregate summary line correspondingly reports two newer counters, `voiced→letter fallbacks` (the Letter→Voiced upgrade path) and `body substitutions`.
+
 ## Supported opcodes (reference table)
 
 | Opcode | Shape | Anchor | Prefix |
@@ -306,11 +344,12 @@ Directory mode walks `--evo` recursively with `walkdir`, filters to `.ing`, mirr
 | `[5,6]` | same as `[5,0]` (voiced/continuation variant) | `Portrait{char_id, tag}` | through the `<#E…>` arg |
 | `[5,8]-voiced` | `(65535, 19, 13, 11, V, strings…)` | `Voiced(V)` | through `11, V` |
 | `[5,8]-letter` | `(65535, 19, 13, strings…)` | `Letter` (positional) | through `19, 13` |
+| `[5,8]-voiced-plain` | `(65535, 11, V, strings…)` — EVO upgrade of a Plain line with a voice ID | `Plain` (positional, same anchor as the unvoiced shape) | through `11, V` |
 | `[5,8]-plain` | `(65535, strings…)` | `Plain` (positional) | through `char_id` |
 | `[5,8]-params` | `(65535, 16, …, 17, …, …)` — no strings | — | skipped |
 | anything else | — | — | skipped |
 
-`Voiced` is the only `[5,8]` key that carries a uniquely identifying anchor; `Letter` and `Plain`, by contrast, rely on counter-based position-matching within the same function. It is worth noting that `[5,8]-voiced` IDs have been verified across the corpus to be stable between `original/`, `xseed-restoration/`, and `evo-voice-mod/`.
+`Voiced` is the only `[5,8]` key that carries a uniquely identifying anchor; `Letter` and `Plain`, by contrast, rely on counter-based position-matching within the same function. The `[5,8]-voiced-plain` shape deliberately emits the same `AnchorKey::Plain` as the unvoiced shape (with a larger `prefix_len`), with the consequence that EVO's voiced song lyrics anchor positionally against XSeed's pre-existing `Plain` runs while the `11, V` voice marker survives the swap. It is worth noting that `[5,8]-voiced` IDs have been verified across the corpus to be stable between `original/`, `xseed-restoration/`, and `evo-voice-mod/`; the EVO mod additionally inserts voice IDs on three lines which the original and XSeed both leave unvoiced, namely 97064 (VoicedPlain) and 97068 / 97069 (Letter→Voiced).
 
 ## Idempotency
 
@@ -324,16 +363,28 @@ These behaviours are covered by `swap::tests::idempotent_second_run_is_noop` and
 
 ## Test surface
 
-Unit tests live next to each module (`#[cfg(test)] mod tests`). Integration tests in `tests/e2e.rs` drive the library entry point against real corpus files:
+Unit tests live next to each module (`#[cfg(test)] mod tests`). Integration tests in `tests/e2e.rs` drive the library entry point against real corpus files. As of the most recent run, the suite comprises 41 unit tests and 20 integration tests, all of which pass.
 
-- **Parser/printer roundtrip stability** on `mp1010_04.ing` and `mp0010_05.ing` (both EVO and XSeed).
+- **Parser/printer roundtrip stability** on `mp1010_04.ing`, `mp0010_05.ing`, and `mp3010_01.ing` (both EVO and XSeed in each case).
 - **The three documented `mp1010_04.ing` examples**: Lugran "Yes, from Aina" → XSeed wording, Joshua jurisdictional disputes, and Estelle General Morgan. Each test asserts that the XSeed text is present, the EVO text is absent, and the EVO voice IDs (`33247`, `60589`, `60593`) survive.
 - **Cassius letter `[5,8]-voiced`**: voice IDs `34832..=34844` survive verbatim, and XSeed's quoted style replaces EVO's.
-- **Idempotency at file level** on both `mp1010_04.ing` and `mp0010_05.ing`.
-- **`resources/` read-only invariant**: both XSeed and `original/` files hash identically before and after a swap.
-- **`ingert.exe` recompile**: the `.ing` output from a swap recompiles back to `.dat` via the fork's binary. This test is gated on the `INGERT_EXE` environment variable, and is the test that would catch a printer-versus-compiler drift.
+- **Letter→Voiced fallback**: `mp1010_04.ing:EV_01_61_00` consequently upgrades two unvoiced letter lines into voiced ones (IDs `97068` and `97069`); the test asserts that the voice IDs survive and that XSeed's letter wording is subsequently applied.
+- **Plain→VoicedPlain shape**: `mp3010_01.ing:QS308_01_00` upgrades an unvoiced song lyric into a voiced one (ID `97064`); the test asserts the voice ID survives and that XSeed's lyric replaces the GungHo wording.
+- **`Body::Asm` substitution**: `mp3010_01.ing:QS300_01_00`. The test asserts that the body-substitution counter increments to one, that the printed output consequently no longer contains an `asm { … }` block, and (in concert with the recompile test below) that the substituted `Tree` body recompiles back to `.dat`.
+- **Idempotency at file level** on `mp1010_04.ing`, `mp0010_05.ing`, and `mp3010_01.ing`.
+- **`resources/` read-only invariant**: both XSeed and `original/` files are verified to hash identically before and after a swap.
+- **`ingert.exe` recompile**: the `.ing` output from a swap recompiles back to `.dat` via the fork's binary on `mp1010_04`, `mp0010_05`, and `mp3010_01` (the latter case exercising the substituted `Tree` body). These tests are gated on the `INGERT_EXE` environment variable, and they consequently catch any printer-versus-compiler drift introduced either by the fork itself or by a substitution.
 
 The recompile and roundtrip tests assume that the `.ing` fixtures have been regenerated (the `.ing` files are gitignored, while only `.dat` is checked in). Running `python scripts/dat2ing.py resources/<corpus>` bootstraps them.
+
+## Analysis binaries
+
+In addition to the merge binary itself, two read-only AST analysis tools live under `sora-remake-merge/src/bin/`. Both reuse the merge tool's classifier and walker, with the consequence that the anchor distributions they report are precisely those which the merge consumes.
+
+- **`compare-original`** (`just compare-original`): walks every EVO body alongside the corresponding `resources/original/` body, counts `[5,*]` syscalls with an anchor-kind breakdown, and reports any function which exhibits a count diff or an anchor-distribution diff. A clean run reports `Net syscall diff EVO-orig: +0`, `Functions w/ count diff: 0`, one anchor diff (`mp1010_04.ing:EV_01_61_00`, accounting for two Letter→Voiced upgrades), and one skipped function (`mp3010_01.ing:QS300_01_00`, which is `Body::Asm`). This is the binary which subsequently established that the EVO mod adds zero new dialogue lines.
+- **`compare-xseed`** (`just compare-xseed`): the symmetric check against `resources/xseed-restoration/`. A clean run additionally surfaces a single XSeed authoring artefact in `mp2000_ev.ing:EV_03_00_00`, where two byte-identical Portrait calls for voice ID `40012` appear back-to-back in XSeed but appear only once in either EVO or `original/`. The merge correctly maps one occurrence and drops the duplicate, with the consequence that no real content is lost; the diff is preserved in the audit output as a known XSeed-only quirk.
+
+The audit TSVs written by the merge itself (`output/_audit/{unmatched,overflow,body_substitutions}.tsv`) cover the merge's runtime view, while the two `compare-*` binaries cover the AST-shape view. Taken together, they consequently render the claim that "EVO introduces no new dialogue lines" verifiable from two independent angles.
 
 ## Workflow summary
 

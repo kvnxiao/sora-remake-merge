@@ -22,11 +22,23 @@ dat2ing-path PATH:
 
 # Run the merge tool: EVO + XSeed -> output/ (forwards extra args)
 merge *ARGS:
-    cargo run --release -- {{ARGS}}
+    cargo run --release --bin sora-remake-merge -- {{ARGS}}
 
 # Dry-run: parse and compute changes without writing
 merge-dry-run:
-    cargo run --release -- --dry-run --verbose
+    cargo run --release --bin sora-remake-merge -- --dry-run --verbose
+
+# Compare EVO body vs original body at AST level — surfaces anchor/count
+# differences the merge tool's audit may not flag (Letter→Voiced upgrades,
+# Plain→VoicedPlain, unsupported shapes, etc.).
+compare-original:
+    cargo run --release --bin compare-original
+
+# Compare EVO body vs XSeed body at AST level — confirms the merge has full
+# coverage (no EVO-only functions silently skipped, no body-kind mismatches
+# missed, no anchor-distribution drift between the two corpora).
+compare-xseed:
+    cargo run --release --bin compare-xseed
 
 # Recompile merged .ing files in output/ back to .dat
 ing2dat:

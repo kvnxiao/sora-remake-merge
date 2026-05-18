@@ -18,7 +18,13 @@ pub enum Site {
 }
 
 pub trait Visitor {
-    fn on_syscall(&mut self, site: Site, key: &AnchorKey, evo_run: &TextRun) -> Option<TextRun>;
+    fn on_syscall(
+        &mut self,
+        site: Site,
+        line: Option<u16>,
+        key: &AnchorKey,
+        evo_run: &TextRun,
+    ) -> Option<TextRun>;
 }
 
 pub fn rewrite_body(stmts: &mut [Stmt], visitor: &mut impl Visitor) {
@@ -64,14 +70,14 @@ fn rewrite_stmt(stmt: &mut Stmt, v: &mut impl Visitor) {
 
 fn rewrite_expr(expr: &mut Expr, v: &mut impl Visitor) {
     match expr {
-        Expr::Syscall(_, a, b, args) => {
+        Expr::Syscall(line, a, b, args) => {
             for arg in args.iter_mut() {
                 rewrite_expr(arg, v);
             }
             if let Some(cls) = classify_syscall_expr(*a, *b, args)
                 && let Some(rest) = args.get(cls.prefix_len..)
                 && let Some(evo_run) = extract_run_expr(rest)
-                && let Some(new_run) = v.on_syscall(Site::Body, &cls.key, &evo_run)
+                && let Some(new_run) = v.on_syscall(Site::Body, *line, &cls.key, &evo_run)
                 && new_run != evo_run
             {
                 args.truncate(cls.prefix_len);
@@ -98,7 +104,7 @@ pub fn rewrite_called(calls: &mut [Call], visitor: &mut impl Visitor) {
             && let Some(cls) = classify_syscall_call(&call.kind, &call.args)
             && let Some(rest) = call.args.get(cls.prefix_len..)
             && let Some(evo_run) = extract_run_call(rest)
-            && let Some(new_run) = visitor.on_syscall(Site::Called, &cls.key, &evo_run)
+            && let Some(new_run) = visitor.on_syscall(Site::Called, None, &cls.key, &evo_run)
             && new_run != evo_run
         {
             call.args.truncate(cls.prefix_len);
@@ -110,6 +116,7 @@ pub fn rewrite_called(calls: &mut [Call], visitor: &mut impl Visitor) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::text_run::TextChunk;
     use indexmap::IndexMap;
     use ingert::scena::Place;
     use ingert::scena::Stmt;
@@ -144,11 +151,12 @@ mod tests {
         fn on_syscall(
             &mut self,
             _site: Site,
+            _line: Option<u16>,
             _key: &AnchorKey,
             _evo_run: &TextRun,
         ) -> Option<TextRun> {
             self.count += 1;
-            Some(vec![self.new_text.clone()])
+            Some(vec![TextChunk::Str(self.new_text.clone())])
         }
     }
 

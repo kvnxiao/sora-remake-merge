@@ -3,6 +3,7 @@
     clippy::expect_used,
     clippy::panic,
     clippy::let_underscore_must_use,
+    clippy::string_slice,
     reason = "tests panic on assertion failure by design"
 )]
 
@@ -33,6 +34,14 @@ const XSEED_MP0010_05: &str = concat!(
 const ORIGINAL_MP1010_04: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../resources/original/script_en/scena/mp1010_04.ing"
+);
+const EVO_MP3010_01: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../resources/evo-voice-mod/script_en/scena/mp3010_01.ing"
+);
+const XSEED_MP3010_01: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../resources/xseed-restoration/script_en/scena/mp3010_01.ing"
 );
 const INGERT_ENV: &str = "INGERT_EXE";
 
@@ -271,4 +280,131 @@ fn mp1010_04_output_recompiles_via_ingert() {
     let _ = fs::remove_file(&tmp);
     let _ = fs::remove_file(tmp.with_extension("dat"));
     assert!(ok, "ingert.exe failed to recompile mp1010_04 output");
+}
+
+// === mp1010_04 EV_01_61_00: Letter→Voiced fallback ===
+//
+// EVO upgraded 2 Letter syscalls (Cassius letter follow-ups) to Voiced by
+// inserting voice IDs 97068/97069. XSeed re-translated the text with the
+// single-quote letter style. The merge should apply XSeed text via the
+// Voiced→Letter fallback while preserving EVO's voice IDs.
+
+#[test]
+fn evo_letter_to_voiced_upgrade_swapped_via_fallback() {
+    let evo_src = read(EVO_MP1010_04);
+    let xseed_src = read(XSEED_MP1010_04);
+    let mut evo = parse_ing(&evo_src).expect("evo parse");
+    let xseed = parse_ing(&xseed_src).expect("xseed parse");
+    let stats = swap_scena(&mut evo, &xseed);
+    assert!(
+        stats.voiced_to_letter_fallback >= 2,
+        "expected >=2 Voiced→Letter fallbacks, got {}",
+        stats.voiced_to_letter_fallback
+    );
+    let out = print_ing(&evo);
+    assert!(
+        out.contains("11, 97068"),
+        "EVO voice id 97068 must survive in output"
+    );
+    assert!(
+        out.contains("11, 97069"),
+        "EVO voice id 97069 must survive in output"
+    );
+    assert!(
+        out.contains("'I was able to secure the item the"),
+        "missing XSeed letter-style translation for 97068"
+    );
+    assert!(
+        out.contains("'Please ask Professor R to do an"),
+        "missing XSeed letter-style translation for 97069"
+    );
+    assert!(
+        !out.contains("\"I retrieved this item from that group.\""),
+        "old EVO GungHo text still present at voiced line"
+    );
+}
+
+// === mp3010_01: VoicedPlain song lyric + Body::Asm substitution ===
+//
+// QS308_01_00 has a song lyric where EVO upgraded Plain to VoicedPlain shape
+// (65535, 11, V, "text"). The merge must apply XSeed's re-translated lyric
+// while preserving voice ID 97064.
+//
+// QS300_01_00 has Body::Asm in EVO (ingert couldn't decompile it to Tree)
+// but Body::Tree in XSeed. Since EVO added no voice IDs in this function,
+// the merge substitutes XSeed's Tree body so the runtime executes XSeed
+// text rather than GungHo text from EVO's asm bytecode.
+
+#[test]
+fn mp3010_01_voiced_plain_song_lyric_swapped() {
+    let evo_src = read(EVO_MP3010_01);
+    let xseed_src = read(XSEED_MP3010_01);
+    let mut evo = parse_ing(&evo_src).expect("evo parse");
+    let xseed = parse_ing(&xseed_src).expect("xseed parse");
+    let _ = swap_scena(&mut evo, &xseed);
+    let out = print_ing(&evo);
+    assert!(
+        out.contains("11, 97064,"),
+        "EVO voice id 97064 must survive in VoicedPlain output"
+    );
+    // XSeed's re-translation contains "Ah, you" and "(3)1 cypress trees".
+    assert!(
+        out.contains("'Ah, you (3)1 cypress trees"),
+        "missing XSeed translation for QS308_01_00 song lyric"
+    );
+    assert!(
+        !out.contains("Atop the hill are 31 cypress trees. 3"),
+        "old EVO GungHo lyric still present"
+    );
+}
+
+#[test]
+fn mp3010_01_asm_body_substituted() {
+    let evo_src = read(EVO_MP3010_01);
+    let xseed_src = read(XSEED_MP3010_01);
+    let mut evo = parse_ing(&evo_src).expect("evo parse");
+    let xseed = parse_ing(&xseed_src).expect("xseed parse");
+    let stats = swap_scena(&mut evo, &xseed);
+    assert_eq!(
+        stats.body_substitutions, 1,
+        "expected exactly 1 body substitution (QS300_01_00 asm→tree)"
+    );
+    let sub = stats
+        .body_subs
+        .iter()
+        .find(|e| e.function == "QS300_01_00")
+        .expect("QS300_01_00 should be in body_subs");
+    assert_eq!(sub.evo_body_kind, "asm");
+    // After substitution, the body should print without asm syntax and the
+    // GungHo text should be gone in favour of XSeed's body.
+    let out = print_ing(&evo);
+    let fn_start = out
+        .find("fn QS300_01_00")
+        .expect("function should exist in output");
+    let fn_end = out[fn_start..]
+        .find("\nfn ")
+        .map_or(out.len(), |o| fn_start + o);
+    let fn_body = &out[fn_start..fn_end];
+    assert!(
+        !fn_body.contains(" asm {"),
+        "asm body should have been replaced with tree body"
+    );
+}
+
+#[test]
+fn idempotent_mp3010_01() {
+    assert_idempotent(EVO_MP3010_01, XSEED_MP3010_01);
+}
+
+#[test]
+fn mp3010_01_output_recompiles_via_ingert() {
+    let out = apply_swap(EVO_MP3010_01, XSEED_MP3010_01);
+    let tmp = write_tmp_ing("mp3010_01", &out);
+    let ok = ingert_recompile(&tmp);
+    let _ = fs::remove_file(&tmp);
+    let _ = fs::remove_file(tmp.with_extension("dat"));
+    assert!(
+        ok,
+        "ingert.exe failed to recompile mp3010_01 output (asm→tree substitution may have broken)"
+    );
 }

@@ -139,6 +139,20 @@ fn classify_s58<T>(
             prefix_len: 3,
         });
     }
+    // [5,8]-voiced-plain: (65535, 11, V, strings...) — EVO upgrade of a Plain
+    // line with a voice ID. Same anchor as regular Plain (positional match
+    // against XSeed's Plain runs); prefix_len skips past `11, V` so the voice
+    // ID survives the swap.
+    if let (Some(a1), Some(a2), Some(a3)) = (args.get(1), args.get(2), args.get(3))
+        && as_int(a1) == Some(11)
+        && as_int(a2).is_some()
+        && is_string(a3)
+    {
+        return Some(Classification {
+            key: AnchorKey::Plain,
+            prefix_len: 3,
+        });
+    }
     if let Some(a1) = args.get(1)
         && is_string(a1)
     {
@@ -275,6 +289,18 @@ mod tests {
         let got = classify_syscall_expr(5, 8, &args).unwrap();
         assert_eq!(got.key, AnchorKey::Voiced(34832));
         assert_eq!(got.prefix_len, 5);
+    }
+
+    #[test]
+    fn s58_voiced_plain_evo_upgrade() {
+        // EVO upgrade of a Plain song-lyric line: (65535, 11, V, string...).
+        // Anchors as Plain (positional) so it matches XSeed's regular Plain
+        // run at the same position; prefix_len=3 preserves the `11, V` voice
+        // ID args during the swap.
+        let args = vec![iv(65535), iv(11), iv(97064), sv("<C1>lyric line")];
+        let got = classify_syscall_expr(5, 8, &args).unwrap();
+        assert_eq!(got.key, AnchorKey::Plain);
+        assert_eq!(got.prefix_len, 3);
     }
 
     #[test]
