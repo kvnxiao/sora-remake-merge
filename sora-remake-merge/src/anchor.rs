@@ -1,5 +1,8 @@
-use ingert::scena::{Expr, Value};
-use ingert::scp::{CallArg, CallKind, Value as ScpValue};
+use ingert::scena::Expr;
+use ingert::scena::Value;
+use ingert::scp::CallArg;
+use ingert::scp::CallKind;
+use ingert::scp::Value as ScpValue;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum AnchorKey {
@@ -50,14 +53,9 @@ pub fn is_localized_opcode(a: u8, b: u8) -> bool {
 
 #[must_use]
 pub fn classify_syscall_expr(a: u8, b: u8, args: &[Expr]) -> Option<Classification> {
-    classify_generic(
-        a,
-        b,
-        args,
-        as_int_expr,
-        as_string_expr,
-        |arg| matches!(arg, Expr::Value(_, Value::String(_))),
-    )
+    classify_generic(a, b, args, as_int_expr, as_string_expr, |arg| {
+        matches!(arg, Expr::Value(_, Value::String(_)))
+    })
 }
 
 #[must_use]
@@ -66,14 +64,9 @@ pub fn classify_syscall_call(kind: &CallKind, args: &[CallArg]) -> Option<Classi
         CallKind::Syscall(a, b) => (*a, *b),
         _ => return None,
     };
-    classify_generic(
-        a,
-        b,
-        args,
-        as_int_call,
-        as_string_call,
-        |arg| matches!(arg, CallArg::Value(ScpValue::String(_))),
-    )
+    classify_generic(a, b, args, as_int_call, as_string_call, |arg| {
+        matches!(arg, CallArg::Value(ScpValue::String(_)))
+    })
 }
 
 fn classify_generic<T>(
@@ -95,7 +88,10 @@ fn classify_generic<T>(
                     && s.starts_with("<#E")
                 {
                     return Some(Classification {
-                        key: AnchorKey::Portrait { char_id, tag: s.to_owned() },
+                        key: AnchorKey::Portrait {
+                            char_id,
+                            tag: s.to_owned(),
+                        },
                         prefix_len: i + 1,
                     });
                 }
@@ -116,37 +112,54 @@ fn classify_s58<T>(
     if !args.iter().skip(1).any(is_string) {
         return None;
     }
-    if let (Some(a1), Some(a2), Some(a3), Some(a4), Some(a5)) =
-        (args.get(1), args.get(2), args.get(3), args.get(4), args.get(5))
-        && as_int(a1) == Some(19)
+    if let (Some(a1), Some(a2), Some(a3), Some(a4), Some(a5)) = (
+        args.get(1),
+        args.get(2),
+        args.get(3),
+        args.get(4),
+        args.get(5),
+    ) && as_int(a1) == Some(19)
         && as_int(a2) == Some(13)
         && as_int(a3) == Some(11)
         && let Some(v) = as_int(a4)
         && is_string(a5)
     {
-        return Some(Classification { key: AnchorKey::Voiced(v), prefix_len: 5 });
+        return Some(Classification {
+            key: AnchorKey::Voiced(v),
+            prefix_len: 5,
+        });
     }
     if let (Some(a1), Some(a2), Some(a3)) = (args.get(1), args.get(2), args.get(3))
         && as_int(a1) == Some(19)
         && as_int(a2) == Some(13)
         && is_string(a3)
     {
-        return Some(Classification { key: AnchorKey::Letter, prefix_len: 3 });
+        return Some(Classification {
+            key: AnchorKey::Letter,
+            prefix_len: 3,
+        });
     }
     if let Some(a1) = args.get(1)
         && is_string(a1)
     {
-        return Some(Classification { key: AnchorKey::Plain, prefix_len: 1 });
+        return Some(Classification {
+            key: AnchorKey::Plain,
+            prefix_len: 1,
+        });
     }
     None
 }
 
 #[cfg(test)]
 mod tests {
-    #![expect(clippy::unwrap_used, reason = "tests panic on assertion failure by design")]
+    #![expect(
+        clippy::unwrap_used,
+        reason = "tests panic on assertion failure by design"
+    )]
 
     use super::*;
-    use ingert::scena::{Expr, Value};
+    use ingert::scena::Expr;
+    use ingert::scena::Value;
 
     fn iv(n: i32) -> Expr {
         Expr::Value(None, Value::Int(n))
@@ -167,7 +180,10 @@ mod tests {
         let got = classify_syscall_expr(5, 0, &args).unwrap();
         assert_eq!(
             got.key,
-            AnchorKey::Portrait { char_id: 134, tag: "<#E_0#M_0#B_0>".into() }
+            AnchorKey::Portrait {
+                char_id: 134,
+                tag: "<#E_0#M_0#B_0>".into()
+            }
         );
         assert_eq!(got.prefix_len, 2);
     }
@@ -178,7 +194,10 @@ mod tests {
         let got = classify_syscall_expr(5, 0, &args).unwrap();
         assert_eq!(
             got.key,
-            AnchorKey::Portrait { char_id: 134, tag: "<#E_0#M_0#B_0>".into() }
+            AnchorKey::Portrait {
+                char_id: 134,
+                tag: "<#E_0#M_0#B_0>".into()
+            }
         );
         assert_eq!(got.prefix_len, 4);
     }
@@ -189,7 +208,10 @@ mod tests {
         let got = classify_syscall_expr(5, 0, &args).unwrap();
         assert_eq!(
             got.key,
-            AnchorKey::Portrait { char_id: 1, tag: "<#E_2#M_2#B_0>".into() }
+            AnchorKey::Portrait {
+                char_id: 1,
+                tag: "<#E_2#M_2#B_0>".into()
+            }
         );
         assert_eq!(got.prefix_len, 4);
     }
@@ -200,18 +222,28 @@ mod tests {
         let got = classify_syscall_expr(5, 6, &args).unwrap();
         assert_eq!(
             got.key,
-            AnchorKey::Portrait { char_id: 2, tag: "<#E_8#M_0#B_0>".into() }
+            AnchorKey::Portrait {
+                char_id: 2,
+                tag: "<#E_8#M_0#B_0>".into()
+            }
         );
         assert_eq!(got.prefix_len, 2);
     }
 
     #[test]
     fn portrait_ignores_line_annotation() {
-        let args = vec![iv_line(134, 2489), sv_line("<#E_0#M_0#B_0>", 2490), sv("text")];
+        let args = vec![
+            iv_line(134, 2489),
+            sv_line("<#E_0#M_0#B_0>", 2490),
+            sv("text"),
+        ];
         let got = classify_syscall_expr(5, 0, &args).unwrap();
         assert_eq!(
             got.key,
-            AnchorKey::Portrait { char_id: 134, tag: "<#E_0#M_0#B_0>".into() }
+            AnchorKey::Portrait {
+                char_id: 134,
+                tag: "<#E_0#M_0#B_0>".into()
+            }
         );
     }
 

@@ -1,13 +1,19 @@
-use std::collections::HashMap;
-
-use ingert::scena::{Body, Called, Function, Scena};
+use crate::anchor::AnchorKey;
+use crate::anchor::classify_syscall_call;
+use crate::anchor::classify_syscall_expr;
+use crate::text_run::TextRun;
+use crate::text_run::extract_run_call;
+use crate::text_run::extract_run_expr;
+use crate::walker::Site;
+use crate::walker::Visitor;
+use crate::walker::rewrite_body;
+use crate::walker::rewrite_called;
+use ingert::scena::Body;
+use ingert::scena::Called;
+use ingert::scena::Function;
+use ingert::scena::Scena;
 use ingert::scp::Call;
-
-use crate::anchor::{
-    classify_syscall_call, classify_syscall_expr, AnchorKey,
-};
-use crate::text_run::{extract_run_call, extract_run_expr, TextRun};
-use crate::walker::{rewrite_body, rewrite_called, Site, Visitor};
+use std::collections::HashMap;
 
 #[derive(Debug, Default, Clone)]
 pub struct SwapStats {
@@ -150,12 +156,7 @@ struct SwapVisitor<'a> {
 }
 
 impl Visitor for SwapVisitor<'_> {
-    fn on_syscall(
-        &mut self,
-        site: Site,
-        key: &AnchorKey,
-        evo_run: &TextRun,
-    ) -> Option<TextRun> {
+    fn on_syscall(&mut self, site: Site, key: &AnchorKey, evo_run: &TextRun) -> Option<TextRun> {
         let Some(runs) = self.index.get(key) else {
             self.stats.unmatched_evo_calls += 1;
             return None;
@@ -210,7 +211,15 @@ mod tests {
 
     use super::*;
     use indexmap::IndexMap;
-    use ingert::scena::{Arg, ArgType, Body, Called, Expr, Function, Scena, Stmt, Value};
+    use ingert::scena::Arg;
+    use ingert::scena::ArgType;
+    use ingert::scena::Body;
+    use ingert::scena::Called;
+    use ingert::scena::Expr;
+    use ingert::scena::Function;
+    use ingert::scena::Scena;
+    use ingert::scena::Stmt;
+    use ingert::scena::Value;
 
     fn iv(n: i32) -> Expr {
         Expr::Value(None, Value::Int(n))
@@ -265,7 +274,9 @@ mod tests {
         let Body::Tree(body) = &evo.functions["F"].body else {
             unreachable!()
         };
-        let Body::Tree(orig) = &evo_fn.body else { unreachable!() };
+        let Body::Tree(orig) = &evo_fn.body else {
+            unreachable!()
+        };
         assert_eq!(body, orig);
     }
 
@@ -372,13 +383,13 @@ mod tests {
 
     #[test]
     fn called_table_swapped_with_same_index_as_body() {
-        use ingert::scp::{Call, CallArg, CallKind, Value as ScpValue};
+        use ingert::scp::Call;
+        use ingert::scp::CallArg;
+        use ingert::scp::CallKind;
+        use ingert::scp::Value as ScpValue;
 
         let body = vec![Stmt::Expr(portrait_call_voiced(
-            134,
-            33247,
-            "<#E_0>",
-            "EVO body",
+            134, 33247, "<#E_0>", "EVO body",
         ))];
         let called = vec![Call {
             kind: CallKind::Syscall(5, 0),
@@ -394,16 +405,14 @@ mod tests {
             is_prelude: false,
             body: Body::Tree(body),
         };
-        let xseed_fn = make_fn(vec![Stmt::Expr(portrait_call(
-            134,
-            "<#E_0>",
-            "XSEED",
-        ))]);
+        let xseed_fn = make_fn(vec![Stmt::Expr(portrait_call(134, "<#E_0>", "XSEED"))]);
         let mut evo = make_scena("F", evo_fn);
         let xseed = make_scena("F", xseed_fn);
         let _ = swap_scena(&mut evo, &xseed);
         let f = &evo.functions["F"];
-        let Body::Tree(body) = &f.body else { unreachable!() };
+        let Body::Tree(body) = &f.body else {
+            unreachable!()
+        };
         let Stmt::Expr(Expr::Syscall(_, _, _, body_args)) = &body[0] else {
             unreachable!()
         };
@@ -411,7 +420,9 @@ mod tests {
             unreachable!()
         };
         assert_eq!(body_text, "XSEED");
-        let Called::Raw(calls) = &f.called else { unreachable!() };
+        let Called::Raw(calls) = &f.called else {
+            unreachable!()
+        };
         match &calls[0].args[2] {
             ingert::scp::CallArg::Value(ingert::scp::Value::String(s)) => {
                 assert_eq!(s, "XSEED");

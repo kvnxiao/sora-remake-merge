@@ -1,5 +1,6 @@
 use ingert::scena::Scena;
-use ingert_syntax::diag::{Errors, Severity};
+use ingert_syntax::diag::Errors;
+use ingert_syntax::diag::Severity;
 
 #[derive(Debug)]
 pub struct ParseError {

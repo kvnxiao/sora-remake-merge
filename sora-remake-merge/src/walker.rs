@@ -1,10 +1,15 @@
-use ingert::scena::{Expr, Stmt};
-use ingert::scp::{Call, CallKind};
-
-use crate::anchor::{classify_syscall_call, classify_syscall_expr, AnchorKey};
-use crate::text_run::{
-    build_run_call, build_run_expr, extract_run_call, extract_run_expr, TextRun,
-};
+use crate::anchor::AnchorKey;
+use crate::anchor::classify_syscall_call;
+use crate::anchor::classify_syscall_expr;
+use crate::text_run::TextRun;
+use crate::text_run::build_run_call;
+use crate::text_run::build_run_expr;
+use crate::text_run::extract_run_call;
+use crate::text_run::extract_run_expr;
+use ingert::scena::Expr;
+use ingert::scena::Stmt;
+use ingert::scp::Call;
+use ingert::scp::CallKind;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Site {
@@ -13,12 +18,7 @@ pub enum Site {
 }
 
 pub trait Visitor {
-    fn on_syscall(
-        &mut self,
-        site: Site,
-        key: &AnchorKey,
-        evo_run: &TextRun,
-    ) -> Option<TextRun>;
+    fn on_syscall(&mut self, site: Site, key: &AnchorKey, evo_run: &TextRun) -> Option<TextRun>;
 }
 
 pub fn rewrite_body(stmts: &mut [Stmt], visitor: &mut impl Visitor) {
@@ -111,8 +111,14 @@ pub fn rewrite_called(calls: &mut [Call], visitor: &mut impl Visitor) {
 mod tests {
     use super::*;
     use indexmap::IndexMap;
-    use ingert::scena::{Place, Stmt, Value, Var};
-    use ingert::scp::{Call, CallArg, CallKind, Value as ScpValue};
+    use ingert::scena::Place;
+    use ingert::scena::Stmt;
+    use ingert::scena::Value;
+    use ingert::scena::Var;
+    use ingert::scp::Call;
+    use ingert::scp::CallArg;
+    use ingert::scp::CallKind;
+    use ingert::scp::Value as ScpValue;
 
     fn iv(n: i32) -> Expr {
         Expr::Value(None, Value::Int(n))
@@ -122,12 +128,7 @@ mod tests {
     }
 
     fn make_syscall(text: &str) -> Expr {
-        Expr::Syscall(
-            None,
-            5,
-            0,
-            vec![iv(0), sv("<#E_0#M_0#B_0>"), sv(text)],
-        )
+        Expr::Syscall(None, 5, 0, vec![iv(0), sv("<#E_0#M_0#B_0>"), sv(text)])
     }
 
     fn make_stmt(text: &str) -> Stmt {
@@ -202,12 +203,7 @@ mod tests {
     #[test]
     fn walker_visits_nested_block_and_if() {
         let mut body = vec![Stmt::Block(vec![
-            Stmt::If(
-                None,
-                iv(0),
-                vec![Stmt::Block(vec![make_stmt("a")])],
-                None,
-            ),
+            Stmt::If(None, iv(0), vec![Stmt::Block(vec![make_stmt("a")])], None),
             make_stmt("b"),
         ])];
         assert_eq!(count_swaps(&mut body), 2);
@@ -239,7 +235,8 @@ mod tests {
 
     #[test]
     fn called_merged_is_left_alone_by_swap_caller() {
-        // Called::Merged variants aren't even passed to rewrite_called; the caller skips them.
-        // This is documented behavior — verified by the swap layer test.
+        // Called::Merged variants aren't even passed to rewrite_called; the
+        // caller skips them. This is documented behavior — verified by
+        // the swap layer test.
     }
 }

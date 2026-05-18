@@ -6,9 +6,12 @@
     reason = "tests panic on assertion failure by design"
 )]
 
-use sora_remake_merge::{parse_ing, print_ing, swap_scena};
+use sora_remake_merge::parse_ing;
+use sora_remake_merge::print_ing;
+use sora_remake_merge::swap_scena;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::path::PathBuf;
 use std::process::Command;
 
 const EVO_MP1010_04: &str = concat!(
@@ -130,7 +133,10 @@ fn joshua_jurisdictional_disputes_swapped() {
         !out.contains("In other words, this is a power"),
         "old EVO Joshua wording still present"
     );
-    assert!(out.contains("11, 60589"), "EVO voice id 11, 60589 must survive");
+    assert!(
+        out.contains("11, 60589"),
+        "EVO voice id 11, 60589 must survive"
+    );
 }
 
 #[test]
@@ -144,7 +150,10 @@ fn estelle_general_morgan_swapped() {
         !out.contains("<P1>Who's this General Morgan guy?"),
         "old EVO Estelle wording still present"
     );
-    assert!(out.contains("11, 60593"), "EVO voice id 11, 60593 must survive");
+    assert!(
+        out.contains("11, 60593"),
+        "EVO voice id 11, 60593 must survive"
+    );
 }
 
 #[test]
@@ -230,11 +239,7 @@ fn ingert_recompile(ing_path: &Path) -> bool {
     let dat_path = ing_path.with_extension("dat");
     let _ = fs::remove_file(&dat_path);
     let status = Command::new(&exe)
-        .args([
-            "-o",
-            dat_path.to_str().unwrap(),
-            ing_path.to_str().unwrap(),
-        ])
+        .args(["-o", dat_path.to_str().unwrap(), ing_path.to_str().unwrap()])
         .status()
         .expect("spawn ingert.exe");
     status.success() && dat_path.exists()

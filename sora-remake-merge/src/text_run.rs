@@ -1,5 +1,7 @@
-use ingert::scena::{Expr, Value};
-use ingert::scp::{CallArg, Value as ScpValue};
+use ingert::scena::Expr;
+use ingert::scena::Value;
+use ingert::scp::CallArg;
+use ingert::scp::Value as ScpValue;
 
 pub type TextRun = Vec<String>;
 

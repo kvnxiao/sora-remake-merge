@@ -1,9 +1,14 @@
-use std::path::{Path, PathBuf};
-use std::process::ExitCode;
-
-use anyhow::{Context, Result, anyhow};
+use anyhow::Context;
+use anyhow::Result;
+use anyhow::anyhow;
 use clap::Parser;
-use sora_remake_merge::{SwapStats, parse_ing, print_ing, swap_scena};
+use sora_remake_merge::SwapStats;
+use sora_remake_merge::parse_ing;
+use sora_remake_merge::print_ing;
+use sora_remake_merge::swap_scena;
+use std::path::Path;
+use std::path::PathBuf;
+use std::process::ExitCode;
 use walkdir::WalkDir;
 
 const DEFAULT_EVO: &str = "resources/evo-voice-mod";
@@ -86,10 +91,13 @@ fn run_dir(
         if entry.path().extension().is_none_or(|e| e != "ing") {
             continue;
         }
-        let rel = entry
-            .path()
-            .strip_prefix(evo_root)
-            .map_err(|e| anyhow!("strip_prefix({}, {}): {e}", entry.path().display(), evo_root.display()))?;
+        let rel = entry.path().strip_prefix(evo_root).map_err(|e| {
+            anyhow!(
+                "strip_prefix({}, {}): {e}",
+                entry.path().display(),
+                evo_root.display()
+            )
+        })?;
         let xseed_path = xseed_root.join(rel);
         if !xseed_path.exists() {
             files_missing_xseed += 1;
