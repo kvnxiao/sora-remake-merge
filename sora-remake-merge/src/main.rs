@@ -25,14 +25,14 @@ const DEFAULT_OUT: &str = "output";
 #[derive(Parser, Debug)]
 #[command(
     name = "sora-remake-merge",
-    about = "Merge XSeed English text into EVO Voice mod .ing scripts"
+    about = "Merge Xseed English text into EVO Voice mod .ing scripts"
 )]
 struct Cli {
     /// EVO source (file or directory). Default: `resources/evo-voice-mod`
     #[arg(long, default_value = DEFAULT_EVO)]
     evo: PathBuf,
 
-    /// XSeed source (file or directory). Default: `resources/xseed-restoration`
+    /// Xseed source (file or directory). Default: `resources/xseed-restoration`
     #[arg(long, default_value = DEFAULT_XSEED)]
     xseed: PathBuf,
 
@@ -68,7 +68,7 @@ fn run(cli: &Cli) -> Result<()> {
         anyhow::bail!("EVO path does not exist: {}", cli.evo.display());
     }
     if !cli.xseed.exists() {
-        anyhow::bail!("XSeed path does not exist: {}", cli.xseed.display());
+        anyhow::bail!("Xseed path does not exist: {}", cli.xseed.display());
     }
     if cli.evo.is_dir() {
         run_dir(&cli.evo, &cli.xseed, &cli.out, cli.dry_run, cli.verbose)
@@ -144,7 +144,7 @@ fn run_dir(
 
     println!(
         "Processed {files_processed} files, {files_changed} changed, \
-         {files_missing_xseed} XSeed-missing skipped"
+         {files_missing_xseed} Xseed-missing skipped"
     );
     println!(
         "Swaps: {applied} applied, {noops} no-ops, {unmatched} unmatched, \
@@ -284,12 +284,12 @@ fn run_file(evo: &Path, xseed: &Path, out: &Path, dry_run: bool) -> Result<SwapS
     let evo_src = std::fs::read_to_string(evo)
         .with_context(|| format!("failed to read EVO file {}", evo.display()))?;
     let xseed_src = std::fs::read_to_string(xseed)
-        .with_context(|| format!("failed to read XSeed file {}", xseed.display()))?;
+        .with_context(|| format!("failed to read Xseed file {}", xseed.display()))?;
 
     let mut evo_scena = parse_ing(&evo_src)
         .with_context(|| format!("failed to parse EVO file {}", evo.display()))?;
     let xseed_scena = parse_ing(&xseed_src)
-        .with_context(|| format!("failed to parse XSeed file {}", xseed.display()))?;
+        .with_context(|| format!("failed to parse Xseed file {}", xseed.display()))?;
 
     let stats = swap_scena(&mut evo_scena, &xseed_scena);
 

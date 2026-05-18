@@ -4,4 +4,4 @@
 allow-expect-in-tests = true
 
 # Project-specific proper nouns that should not trigger clippy::doc_markdown.
-doc-valid-idents = ["XSeed", "EVO", "GungHo", "Ingert", "AGENTS", "ED9"]
+doc-valid-idents = ["Xseed", "EVO", "GungHo", "Ingert", "AGENTS", "ED9"]

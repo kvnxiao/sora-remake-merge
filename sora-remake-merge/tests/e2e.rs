@@ -119,11 +119,11 @@ fn lugran_yes_from_aina_swapped_both_occurrences() {
     let out = apply_swap_mp1010_04();
     assert!(
         out.contains("<P2>Yes, I received a call from Aina"),
-        "missing XSeed Lugran wording"
+        "missing Xseed Lugran wording"
     );
     assert!(
         out.contains("not that long ago."),
-        "missing XSeed Lugran continuation"
+        "missing Xseed Lugran continuation"
     );
     assert!(
         !out.contains("<P2>Yes, from Aina."),
@@ -137,7 +137,7 @@ fn lugran_yes_from_aina_swapped_both_occurrences() {
 #[test]
 fn joshua_jurisdictional_disputes_swapped() {
     let out = apply_swap_mp1010_04();
-    assert!(out.contains("jurisdictional"), "missing XSeed wording");
+    assert!(out.contains("jurisdictional"), "missing Xseed wording");
     assert!(
         !out.contains("In other words, this is a power"),
         "old EVO Joshua wording still present"
@@ -153,7 +153,7 @@ fn estelle_general_morgan_swapped() {
     let out = apply_swap_mp1010_04();
     assert!(
         out.contains("<P1>General Morgan? Who's that?"),
-        "missing XSeed Estelle wording"
+        "missing Xseed Estelle wording"
     );
     assert!(
         !out.contains("<P1>Who's this General Morgan guy?"),
@@ -170,7 +170,7 @@ fn cassius_letter_voiced_swapped() {
     let out = apply_swap_mp1010_04();
     assert!(
         out.contains("'Dear Estelle and Joshua,'"),
-        "missing XSeed Cassius letter quoting style"
+        "missing Xseed Cassius letter quoting style"
     );
     for v in 34832..=34844 {
         let needle = format!(", {v},");
@@ -285,8 +285,8 @@ fn mp1010_04_output_recompiles_via_ingert() {
 // === mp1010_04 EV_01_61_00: Letter→Voiced fallback ===
 //
 // EVO upgraded 2 Letter syscalls (Cassius letter follow-ups) to Voiced by
-// inserting voice IDs 97068/97069. XSeed re-translated the text with the
-// single-quote letter style. The merge should apply XSeed text via the
+// inserting voice IDs 97068/97069. Xseed re-translated the text with the
+// single-quote letter style. The merge should apply Xseed text via the
 // Voiced→Letter fallback while preserving EVO's voice IDs.
 
 #[test]
@@ -312,11 +312,11 @@ fn evo_letter_to_voiced_upgrade_swapped_via_fallback() {
     );
     assert!(
         out.contains("'I was able to secure the item the"),
-        "missing XSeed letter-style translation for 97068"
+        "missing Xseed letter-style translation for 97068"
     );
     assert!(
         out.contains("'Please ask Professor R to do an"),
-        "missing XSeed letter-style translation for 97069"
+        "missing Xseed letter-style translation for 97069"
     );
     assert!(
         !out.contains("\"I retrieved this item from that group.\""),
@@ -327,12 +327,12 @@ fn evo_letter_to_voiced_upgrade_swapped_via_fallback() {
 // === mp3010_01: VoicedPlain song lyric + Body::Asm substitution ===
 //
 // QS308_01_00 has a song lyric where EVO upgraded Plain to VoicedPlain shape
-// (65535, 11, V, "text"). The merge must apply XSeed's re-translated lyric
+// (65535, 11, V, "text"). The merge must apply Xseed's re-translated lyric
 // while preserving voice ID 97064.
 //
 // QS300_01_00 has Body::Asm in EVO (ingert couldn't decompile it to Tree)
-// but Body::Tree in XSeed. Since EVO added no voice IDs in this function,
-// the merge substitutes XSeed's Tree body so the runtime executes XSeed
+// but Body::Tree in Xseed. Since EVO added no voice IDs in this function,
+// the merge substitutes Xseed's Tree body so the runtime executes Xseed
 // text rather than GungHo text from EVO's asm bytecode.
 
 #[test]
@@ -347,10 +347,10 @@ fn mp3010_01_voiced_plain_song_lyric_swapped() {
         out.contains("11, 97064,"),
         "EVO voice id 97064 must survive in VoicedPlain output"
     );
-    // XSeed's re-translation contains "Ah, you" and "(3)1 cypress trees".
+    // Xseed's re-translation contains "Ah, you" and "(3)1 cypress trees".
     assert!(
         out.contains("'Ah, you (3)1 cypress trees"),
-        "missing XSeed translation for QS308_01_00 song lyric"
+        "missing Xseed translation for QS308_01_00 song lyric"
     );
     assert!(
         !out.contains("Atop the hill are 31 cypress trees. 3"),
@@ -376,7 +376,7 @@ fn mp3010_01_asm_body_substituted() {
         .expect("QS300_01_00 should be in body_subs");
     assert_eq!(sub.evo_body_kind, "asm");
     // After substitution, the body should print without asm syntax and the
-    // GungHo text should be gone in favour of XSeed's body.
+    // GungHo text should be gone in favour of Xseed's body.
     let out = print_ing(&evo);
     let fn_start = out
         .find("fn QS300_01_00")

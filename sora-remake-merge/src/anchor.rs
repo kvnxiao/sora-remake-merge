@@ -141,7 +141,7 @@ fn classify_s58<T>(
     }
     // [5,8]-voiced-plain: (65535, 11, V, strings...) — EVO upgrade of a Plain
     // line with a voice ID. Same anchor as regular Plain (positional match
-    // against XSeed's Plain runs); prefix_len skips past `11, V` so the voice
+    // against Xseed's Plain runs); prefix_len skips past `11, V` so the voice
     // ID survives the swap.
     if let (Some(a1), Some(a2), Some(a3)) = (args.get(1), args.get(2), args.get(3))
         && as_int(a1) == Some(11)
@@ -294,7 +294,7 @@ mod tests {
     #[test]
     fn s58_voiced_plain_evo_upgrade() {
         // EVO upgrade of a Plain song-lyric line: (65535, 11, V, string...).
-        // Anchors as Plain (positional) so it matches XSeed's regular Plain
+        // Anchors as Plain (positional) so it matches Xseed's regular Plain
         // run at the same position; prefix_len=3 preserves the `11, V` voice
         // ID args during the swap.
         let args = vec![iv(65535), iv(11), iv(97064), sv("<C1>lyric line")];

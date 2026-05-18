@@ -1,6 +1,6 @@
 [package]
 name        = "sora-remake-merge"
-description = "Merge XSeed English text into EVO Voice mod .ing scripts for Trails in the Sky 1st Chapter"
+description = "Merge Xseed English text into EVO Voice mod .ing scripts for Trails in the Sky 1st Chapter"
 license     = "MIT"
 keywords    = ["trails-in-the-sky", "sora", "modding", "localization"]
 categories  = ["command-line-utilities"]

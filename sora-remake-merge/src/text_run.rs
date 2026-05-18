@@ -111,7 +111,7 @@ mod tests {
 
     #[test]
     fn extract_adjacent_strings_no_newline() {
-        // XSeed sometimes emits "a", "b" with no Int(10) between — auto-wrap, no forced
+        // Xseed sometimes emits "a", "b" with no Int(10) between — auto-wrap, no forced
         // newline.
         let args = vec![sv("hello"), sv("world")];
         assert_eq!(extract_run_expr(&args), Some(vec![s("hello"), s("world")]));

@@ -2,7 +2,7 @@
 
 Currently:
 - table_en/t_name.tbl: EVO ships this byte-identically to resources/original/,
-  so XSeed's copy is the merged result by definition. See README §"Auxiliary
+  so Xseed's copy is the merged result by definition. See README §"Auxiliary
   tables" for the byte-level verification.
 """
 

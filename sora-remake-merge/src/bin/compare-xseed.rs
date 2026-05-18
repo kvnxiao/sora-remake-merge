@@ -1,14 +1,14 @@
-//! Per-function body syscall comparison between EVO and XSeed.
+//! Per-function body syscall comparison between EVO and Xseed.
 //!
 //! The companion to `compare-original`. Where that binary verifies EVO does
 //! not add new lines vs the GungHo baseline, this one verifies the merge can
 //! actually reach every EVO line — flagging any function that would be
-//! silently skipped by `swap_scena` because its XSeed counterpart is missing
+//! silently skipped by `swap_scena` because its Xseed counterpart is missing
 //! or its body cannot be walked (`Body::Asm` / `Body::Flat`).
 //!
 //! Reports:
-//!   * Functions in EVO with no XSeed counterpart (merge leaves byte-identical)
-//!   * Functions whose body-syscall count differs between EVO and XSeed
+//!   * Functions in EVO with no Xseed counterpart (merge leaves byte-identical)
+//!   * Functions whose body-syscall count differs between EVO and Xseed
 //!   * Functions whose anchor distribution differs (Letter→Voiced, etc.)
 //!   * `Body::Asm` / `Body::Flat` bodies in either side
 //!
@@ -179,7 +179,7 @@ fn run() -> Result<()> {
         anyhow::bail!("EVO root does not exist: {}", evo_root.display());
     }
     if !xseed_root.exists() {
-        anyhow::bail!("XSeed root does not exist: {}", xseed_root.display());
+        anyhow::bail!("Xseed root does not exist: {}", xseed_root.display());
     }
 
     let mut files_processed = 0_usize;
@@ -216,7 +216,7 @@ fn run() -> Result<()> {
         let evo_scena =
             parse_ing(&evo_src).with_context(|| format!("parse EVO {}", entry.path().display()))?;
         let xseed_scena = parse_ing(&xseed_src)
-            .with_context(|| format!("parse XSeed {}", xseed_path.display()))?;
+            .with_context(|| format!("parse Xseed {}", xseed_path.display()))?;
 
         for (name, evo_fn) in &evo_scena.functions {
             let Some(xseed_fn) = xseed_scena.functions.get(name) else {
@@ -278,14 +278,14 @@ fn run() -> Result<()> {
 
     println!("\n--- summary ---");
     println!("Files processed:           {files_processed}");
-    println!("Files w/o XSeed:           {missing_xseed_files}");
+    println!("Files w/o Xseed:           {missing_xseed_files}");
     println!("EVO-only fns (>0 lines):   {evo_only_fns}");
     println!("Functions w/ count diff:   {count_diff_fns}");
     println!("Functions w/ anchor diff:  {anchor_diff_fns}");
     println!("EVO non-tree bodies:       {non_tree_evo}");
-    println!("XSeed non-tree bodies:     {non_tree_xseed}");
+    println!("Xseed non-tree bodies:     {non_tree_xseed}");
     println!("Total EVO body syscalls:   {total_evo_lines}");
-    println!("Total XSeed body syscalls: {total_xseed_lines}");
+    println!("Total Xseed body syscalls: {total_xseed_lines}");
     Ok(())
 }
 

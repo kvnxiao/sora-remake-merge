@@ -35,9 +35,9 @@ pub struct OverflowEntry {
 }
 
 /// Recorded when EVO's body is `Asm`/`Flat` (couldn't decompile to `Tree`)
-/// but XSeed's body is `Tree`, and EVO's calls-table has no voice IDs that
+/// but Xseed's body is `Tree`, and EVO's calls-table has no voice IDs that
 /// would be lost by substitution. The swap layer replaces EVO's body with
-/// a clone of XSeed's so the runtime executes the XSeed text rather than
+/// a clone of Xseed's so the runtime executes the Xseed text rather than
 /// the GungHo text embedded in EVO's asm bytecode.
 #[derive(Debug, Clone)]
 pub struct BodySubstitutionEntry {
@@ -87,7 +87,7 @@ pub fn swap_scena(evo: &mut Scena, xseed: &Scena) -> SwapStats {
 
 /// Returns true if EVO's calls-table contains any syscall whose argument
 /// list carries an explicit `11, V` voice-ID marker. Used as the safety
-/// gate before substituting an EVO Asm/Flat body with a clone of XSeed's
+/// gate before substituting an EVO Asm/Flat body with a clone of Xseed's
 /// Tree body — we only substitute when EVO has added nothing voice-related
 /// to this function.
 ///
@@ -262,7 +262,7 @@ impl Visitor for SwapVisitor<'_> {
         // Lookup order: (site, key) → (Body, key) when site is Called →
         // (site, Letter) when key is Voiced(_) [EVO Letter→Voiced upgrade].
         // The last fallback shares the counter with regular Letter calls so
-        // multiple upgraded Voiceds advance positionally through XSeed's
+        // multiple upgraded Voiceds advance positionally through Xseed's
         // Letter runs in the same source order.
         let direct = self
             .index
@@ -334,8 +334,8 @@ fn swap_function(name: &str, evo: &mut Function, xseed: &Function, index: &Index
         stats: SwapStats::default(),
     };
     // Asm/Flat body substitution: when EVO's body couldn't be decompiled to
-    // Tree but XSeed's body could, and EVO has added no voice IDs in this
-    // function, clone XSeed's body into EVO. Without this, EVO retains
+    // Tree but Xseed's body could, and EVO has added no voice IDs in this
+    // function, clone Xseed's body into EVO. Without this, EVO retains
     // GungHo text embedded in its asm bytecode (since the body walker only
     // touches Tree bodies). The called-table swap alone doesn't reach the
     // runtime since that block is metadata.
@@ -514,7 +514,7 @@ mod tests {
             Stmt::Expr(s58_voiced(34832, "evo-a")),
             Stmt::Expr(s58_voiced(34833, "evo-b")),
         ]);
-        // Reverse order in XSeed to prove the match is by voice ID, not position.
+        // Reverse order in Xseed to prove the match is by voice ID, not position.
         let xseed_fn = make_fn(vec![
             Stmt::Expr(s58_voiced(34833, "x-b")),
             Stmt::Expr(s58_voiced(34832, "x-a")),
@@ -606,9 +606,9 @@ mod tests {
     #[test]
     fn voiced_to_letter_fallback_matches_positionally() {
         // EVO upgraded 2 Letter calls to Voiced (e.g. Cassius letter
-        // follow-ups in mp1010_04 EV_01_61_00). XSeed still has them as
+        // follow-ups in mp1010_04 EV_01_61_00). Xseed still has them as
         // Letters with re-translated text. The fallback should consume
-        // XSeed's Letter runs in source order.
+        // Xseed's Letter runs in source order.
         let evo_fn = make_fn(vec![
             Stmt::Expr(s58_voiced(97068, "EVO old text A")),
             Stmt::Expr(s58_voiced(97069, "EVO old text B")),
@@ -652,7 +652,7 @@ mod tests {
     fn voiced_plain_evo_upgrade_matches_xseed_plain() {
         // mp3010_01 QS308_01_00 song-lyric pattern: EVO upgraded Plain to
         // VoicedPlain shape (65535, 11, V, "text"). The classifier now
-        // returns AnchorKey::Plain with prefix_len=3, matching XSeed's
+        // returns AnchorKey::Plain with prefix_len=3, matching Xseed's
         // regular Plain run positionally. Voice ID at args[1..3] survives.
         let evo_fn = make_fn(vec![Stmt::Expr(s58_voiced_plain(97064, "EVO old lyric"))]);
         let xseed_fn = make_fn(vec![Stmt::Expr(s58_plain("XSEED translated lyric"))]);
@@ -737,9 +737,9 @@ mod tests {
     #[test]
     fn asm_body_substituted_when_xseed_is_tree_and_no_voice_ids() {
         // mp3010_01 QS300_01_00 case: EVO body is Asm (ingert couldn't
-        // decompile to Tree) but XSeed body is Tree and EVO's calls-table
-        // has no voice IDs. The swap layer should clone XSeed's body into
-        // EVO so the runtime executes XSeed text rather than GungHo text
+        // decompile to Tree) but Xseed body is Tree and EVO's calls-table
+        // has no voice IDs. The swap layer should clone Xseed's body into
+        // EVO so the runtime executes Xseed text rather than GungHo text
         // embedded in EVO's asm bytecode.
         let evo_fn = Function {
             args: Vec::new(),
@@ -765,7 +765,7 @@ mod tests {
     #[test]
     fn asm_body_not_substituted_when_evo_has_voice_ids() {
         // If EVO's calls-table reveals any voice-ID upgrade in this function,
-        // substituting XSeed's body would silently drop EVO's contribution.
+        // substituting Xseed's body would silently drop EVO's contribution.
         // Skip the substitution and leave EVO's asm body alone.
         use ingert::scp::Call;
         use ingert::scp::CallArg;

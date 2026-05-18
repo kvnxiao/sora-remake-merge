@@ -20,7 +20,7 @@ dat2ing:
 dat2ing-path PATH:
     python scripts/dat2ing.py "{{PATH}}"
 
-# Run the merge tool: EVO + XSeed -> output/ (forwards extra args)
+# Run the merge tool: EVO + Xseed -> output/ (forwards extra args)
 merge *ARGS:
     cargo run --release --bin sora-remake-merge -- {{ARGS}}
 
@@ -34,7 +34,7 @@ merge-dry-run:
 compare-original:
     cargo run --release --bin compare-original
 
-# Compare EVO body vs XSeed body at AST level — confirms the merge has full
+# Compare EVO body vs Xseed body at AST level — confirms the merge has full
 # coverage (no EVO-only functions silently skipped, no body-kind mismatches
 # missed, no anchor-distribution drift between the two corpora).
 compare-xseed:
@@ -48,9 +48,9 @@ ing2dat:
 ing2dat-path PATH:
     python scripts/ing2dat.py "{{PATH}}"
 
-# EVO ships t_name.tbl byte-identically to original/, so XSeed's copy is the merged result
+# EVO ships t_name.tbl byte-identically to original/, so Xseed's copy is the merged result
 # by definition (verified via KuroTools tbl2json/json2tbl round-trip — see README §"Auxiliary tables").
-# Copy XSeed's auxiliary tables verbatim into output/
+# Copy Xseed's auxiliary tables verbatim into output/
 copy-aux:
     python scripts/copy_aux.py
 
