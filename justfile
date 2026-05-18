@@ -48,8 +48,14 @@ ing2dat:
 ing2dat-path PATH:
     python scripts/ing2dat.py "{{PATH}}"
 
-# Full pipeline: merge, then recompile (assumes .ing fixtures already exist)
-all: merge ing2dat
+# EVO ships t_name.tbl byte-identically to original/, so XSeed's copy is the merged result
+# by definition (verified via KuroTools tbl2json/json2tbl round-trip — see README §"Auxiliary tables").
+# Copy XSeed's auxiliary tables verbatim into output/
+copy-aux:
+    python scripts/copy_aux.py
+
+# Full pipeline: merge, copy aux tables, then recompile (assumes .ing fixtures already exist)
+all: merge copy-aux ing2dat
 
 # === Dev ===
 
