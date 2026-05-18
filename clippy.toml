@@ -1,0 +1,7 @@
+# Allow .expect() in test code; production must use ? + typed errors.
+# `.unwrap()` is denied even in tests so failures carry a descriptive
+# message via `.expect(...)`.
+allow-expect-in-tests = true
+
+# Project-specific proper nouns that should not trigger clippy::doc_markdown.
+doc-valid-idents = ["XSeed", "EVO", "GungHo", "Ingert", "AGENTS", "ED9"]

@@ -1,0 +1,24 @@
+[package]
+name        = "sora-remake-merge"
+description = "Merge XSeed English text into EVO Voice mod .ing scripts for Trails in the Sky 1st Chapter"
+license     = "MIT"
+keywords    = ["trails-in-the-sky", "sora", "modding", "localization"]
+categories  = ["command-line-utilities"]
+publish     = false
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+
+[dependencies]
+ingert.workspace = true
+ingert-syntax.workspace = true
+clap.workspace = true
+walkdir.workspace = true
+anyhow.workspace = true
+indexmap.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
+
+[lints]
+workspace = true
