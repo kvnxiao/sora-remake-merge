@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fmt:
+    name: rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt
+      - run: cargo fmt --all -- --check
+
+  clippy:
+    name: clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+  test:
+    name: test
+    runs-on: windows-latest
+    env:
+      INGERT_VERSION: v1.1.4-sora1
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@nightly
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.x'
+
+      - name: Download ingert.exe
+        shell: pwsh
+        run: |
+          $url = "https://github.com/kvnxiao/ingert-sora1/releases/download/${env:INGERT_VERSION}/ingert.exe"
+          $out = Join-Path $env:RUNNER_TEMP "ingert.exe"
+          Invoke-WebRequest -Uri $url -OutFile $out -UseBasicParsing
+          "INGERT_EXE=$out" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Decompile test fixtures (.dat -> .ing)
+        shell: pwsh
+        run: |
+          $fixtures = @(
+            "resources/evo-voice-mod/script_en/scena/mp1010_04.dat",
+            "resources/evo-voice-mod/script_en/scena/mp0010_05.dat",
+            "resources/xseed-restoration/script_en/scena/mp1010_04.dat",
+            "resources/xseed-restoration/script_en/scena/mp0010_05.dat",
+            "resources/original/script_en/scena/mp1010_04.dat"
+          )
+          foreach ($f in $fixtures) {
+            python scripts/dat2ing.py $f
+            if ($LASTEXITCODE -ne 0) { throw "dat2ing failed for $f" }
+          }
+
+      - run: cargo test --workspace --all-features
