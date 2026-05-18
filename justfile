@@ -57,6 +57,11 @@ copy-aux:
 # Full pipeline: merge, copy aux tables, then recompile (assumes .ing fixtures already exist)
 all: merge copy-aux ing2dat
 
+# Bundle output/ into dist/sora-remake-merge.zip for release.
+# Includes script_en/**/*.dat and table_en/**/*.tbl; excludes .ing decompiles and _audit/.
+bundle:
+    python scripts/bundle_release.py
+
 # === Dev ===
 
 # Format the workspace with nightly rustfmt

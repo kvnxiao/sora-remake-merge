@@ -2,11 +2,27 @@
 
 This crate reconstructs the EVO Voice mod for *The Legend of Heroes: Trails in the Sky 1st Chapter* with the XSeed English localisation layered on top of its GungHo strings, while preserving every EVO voice-line cue intact.
 
-## For players
+## Installation
 
-For visitors who have arrived here looking to download the finished mod rather than to build it from source, the merged scripts are produced under `output/` once the tool has run, and the recompiled `.dat` files (which are the format the game actually loads) are subsequently produced by running `scripts/ing2dat.py` over that directory. A pre-built release is not yet distributed from this repository, so the present documentation assumes a working build of Ingert and of the merge tool itself. For a non-technical overview of what the mod is doing and why it exists, see the **High-level summary** section of [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+This mod is a script-and-table overlay. It depends on three other mods being installed first, in a specific order. All three are hosted on Nexus Mods.
 
-## Layout
+Two install targets appear throughout the steps below. `<GAME_ROOT>` is the directory containing `sora_1st.exe` — e.g. `C:\Program Files (x86)\Steam\steamapps\common\Trails in the Sky 1st Chapter` for a default Steam install. Within it:
+
+- **Packed archives (`.pac`) → `<GAME_ROOT>\pac\steam\`.** These overwrite the game's shipped archives in place.
+- **Loose files and folders (`script_en\`, `table_en\`, etc.) → `<GAME_ROOT>\` directly.** The loose-file loader DLL picks them up from there.
+
+1. **[Sora 1st Loose File Loader](https://www.nexusmods.com/trailsintheskyfirstchapter/mods/28)** — the DLL that lets the game load loose `.dat` / `.tbl` files off disk in preference to the packed archives. Required by every mod below. Drop `xinput1_4.dll` straight into `<GAME_ROOT>\` (keep the filename as-is), then launch the game once to verify it still boots.
+2. **[EVO Voice Mod](https://www.nexusmods.com/trailsintheskyfirstchapter/mods/41)** — download two archives from this mod page:
+   - The **"Evo Voice Mod"** archive, which provides `voice.pac` (the voiced-audio container). Extract ONLY `voice.pac` into `<GAME_ROOT>\pac\steam\` and overwrite the original game's file.
+   - The **"GungHo v1.06.2 CLE v1.06.3"** archive, which provides the packaged `.pac` files the EVO scripts expect. Extract its contents into `<GAME_ROOT>\pac\steam\` as well, overwriting where prompted.
+3. **[XSeed Restoration Mod](https://www.nexusmods.com/trailsintheskyfirstchapter/mods/52)** — download the **full XSeed restoration mod (loose files)** variant and extract its `script_en\` and `table_en\` folders directly into `<GAME_ROOT>\`.
+4. **This mod.** Download `sora-remake-merge.zip` from the [Releases](https://github.com/kvnxiao/sora-remake-merge/releases) page and extract it into `<GAME_ROOT>\`, overwriting any existing XSeed loose files from step 3. The zip contains only `script_en\**\*.dat` and `table_en\t_name.tbl`, so it touches nothing outside the script and name-table layers - which is why you need the XSeed loose files in the first place.
+
+**The install order matters**. Each step layers on top of the previous one, and the final overwrite is intentional. In more detail: EVO ships packed archives that contain GungHo's audio cues plus GungHo English text; XSeed's loose files then shadow that text with the better English wording; this mod finally re-applies the XSeed wording to the EVO-voiced scripts directly, so the lines EVO added voice cues to also get the XSeed text. Installing in any other order will leave one of those layers stale.
+
+## Development
+
+### Layout
 
 ```
 resources/                          # read-only input corpora (only .dat is checked in; .ing is gitignored)
@@ -34,21 +50,19 @@ AGENTS.md / CLAUDE.md               # merge semantics (data model, anchors, repl
 docs/ARCHITECTURE.md                # implementation architecture (modules, AST, swap pipeline)
 ```
 
-## Prerequisites
+### Prerequisites
 
 1. **Build Ingert.** Clone and build the [forked Ingert](https://github.com/kvnxiao/ingert-sora1), which requires nightly Rust. The resulting `ingert.exe` is produced under `Ingert/target/release/`.
 2. **Export `INGERT_EXE`.** Every script and integration test reads this environment variable, so it must be set before invoking either. An example (PowerShell):
    ```powershell
    $env:INGERT_EXE = "C:\path\to\Ingert\target\release\ingert.exe"
    ```
-3. **Regenerate the `.ing` corpora.** Only the `.dat` binary scripts are checked in; the `.ing` decompiles are gitignored, principally to keep the repository size manageable. Bootstrap them once after cloning:
+3. **Generate the `.ing` corpora.** Only the `.dat` binary scripts are checked in; the `.ing` decompiles are gitignored, principally to keep the repository size manageable. Bootstrap them once after cloning:
    ```bash
-   python scripts/dat2ing.py resources/evo-voice-mod
-   python scripts/dat2ing.py resources/xseed-restoration
-   python scripts/dat2ing.py resources/original
+   just dat2ing # install the `just` command runner tool if you don't have it (https://github.com/casey/just)
    ```
 
-## Build
+### Build
 
 The crate depends on the same forked Ingert, pinned by commit hash in `Cargo.toml`. Rust nightly is required (pinned via `rust-toolchain.toml`), since `ingert-syntax` makes use of the `never_type` feature.
 
@@ -58,7 +72,7 @@ cargo build --release
 
 The binary lands at `target/release/sora-remake-merge.exe`.
 
-## Usage
+### CLI Usage
 
 The default invocation reads from `resources/evo-voice-mod` and `resources/xseed-restoration`, subsequently writing the merged output to `output/`:
 
@@ -74,12 +88,12 @@ Single-file mode is triggered automatically when `--evo` points to a file rather
 After a successful run, the merged `.ing` files are subsequently recompiled back to `.dat` for the game:
 
 ```bash
-python scripts/ing2dat.py output/script_en/scena
+just ing2dat
 ```
 
 In addition to the merged `.ing` files, the tool writes a directory of per-run audit logs to `output/_audit/`. Three TSVs are produced: `unmatched.tsv` (EVO calls for which no XSeed anchor was found), `overflow.tsv` (EVO occurrences beyond XSeed's run count for a given anchor, where the final XSeed run is consequently reused), and `body_substitutions.tsv` (functions whose non-`Tree` EVO body was replaced wholesale with XSeed's `Tree` body). On a clean run against the current corpora, the first two contain only their header row, while the third contains a single entry for `mp3010_01.ing:QS300_01_00`.
 
-## What the EVO Voice mod actually changes
+### What the EVO Voice mod actually changes
 
 A subtle but important point, which subsequently constrains both the merge's correctness arguments and the test surface, is that the EVO Voice mod adds **no new dialogue lines whatsoever** relative to either the original GungHo decompile or to the XSeed restoration. The AST-level cross-check (`just compare-original`) confirms that the EVO body-syscall total is identical to the original on a function-by-function basis. The differences that EVO does introduce are restricted to the following three categories, each of which is handled end-to-end by the merge tool.
 
@@ -91,7 +105,7 @@ A subtle but important point, which subsequently constrains both the merge's cor
 
 A companion analysis binary (`just compare-xseed`) performs the symmetric AST-level check against the XSeed corpus. The current run surfaces only the one expected anchor-distribution diff (the two Letter→Voiced upgrades in `mp1010_04.ing:EV_01_61_00`), the one `Body::Asm` function described above, and a single XSeed authoring artefact in `mp2000_ev.ing:EV_03_00_00` where two byte-identical Portrait calls for voice ID `40012` appear back-to-back in XSeed but appear only once in either EVO or `original/`. The merge correctly maps one occurrence and drops the duplicate, with the consequence that no real content is lost. No EVO function is left without an XSeed counterpart.
 
-## Auxiliary tables (`table_en/t_name.tbl`)
+### Auxiliary tables (`table_en/t_name.tbl`)
 
 In addition to the `.ing` script files under `script_en/scena/`, the game loads a localised character-name table from `table_en/t_name.tbl`. A byte-level decode via [KuroTools](https://github.com/Trails-Research-Group/KuroTools) (`python tbl2json.py -g Sora1 t_name.tbl`, schema `NameTableData`, entry length 104, count 1251) confirms two facts that collapse the merge for this file to a single copy operation:
 1. **EVO's `t_name.tbl` is byte-identical to `resources/original/table_en/t_name.tbl`.** The EVO Voice mod consequently introduces no name-table edits whatsoever, in keeping with its scope being limited to script-side voice-cue insertions.
@@ -99,7 +113,7 @@ In addition to the `.ing` script files under `script_en/scena/`, the game loads 
 
 Since EVO contributes nothing for this file, the merged `t_name.tbl` is simply XSeed's `t_name.tbl` verbatim. The `just copy-aux` recipe (invoked by `just all` between `merge` and `ing2dat`) stages `resources/xseed-restoration/table_en/t_name.tbl` directly to `output/table_en/t_name.tbl`. No JSON round-trip through KuroTools is required at build time, since the XSeed file is already a fully-formed `.tbl` accepted by the game; the round-trip was used only to substantiate the byte-identity claim above. KuroTools' `tbl2json.py` and `json2tbl.py` round-trip all three corpora's `t_name.tbl` files byte-identically, with the consequence that any future need to programmatically diff or rewrite this table can fall back to that path without loss of fidelity.
 
-## Tests
+### Tests
 
 ```bash
 cargo test
@@ -119,7 +133,7 @@ Integration tests under `tests/e2e.rs` exercise the following:
 
 The suite presently comprises 41 unit tests across the library modules and 20 integration tests against the real corpora.
 
-## Analysis binaries
+### Analysis binaries
 
 In addition to the merge binary itself, the crate ships two read-only analysis tools under `sora-remake-merge/src/bin/`. Both reuse the merge tool's classifier and AST walker, with the consequence that the anchor kinds they report are precisely those that the merge consumes.
 
@@ -130,6 +144,6 @@ just compare-xseed      # compare EVO body-syscall AST against `resources/xseed-
 
 The former exists principally to substantiate the claim that the EVO mod introduces no new dialogue lines; the latter exists to verify that the merge has full coverage of EVO's content, and that no function is silently skipped for want of an XSeed counterpart. A clean run flags only the expected upgrades and substitutions described in the **What the EVO Voice mod actually changes** section above.
 
-## Background
+### Background
 
 Consult `AGENTS.md` for the merge semantics: the data model, anchor keys per syscall opcode, the string-run replacement rule, and N-to-M disambiguation. The companion document `docs/ARCHITECTURE.md` covers the module layout, AST traversal, and the swap pipeline in detail.

@@ -1,5 +1,6 @@
 /target
 /output
+/dist
 
 # Decompiled scripts are regenerated from the .dat files via scripts/dat2ing.py.
 # Keep them out of git: they're large, text-heavy, and derivable.
