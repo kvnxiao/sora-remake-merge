@@ -64,8 +64,10 @@ jobs:
           $fixtures = @(
             "resources/evo-voice-mod/script_en/scena/mp1010_04.dat",
             "resources/evo-voice-mod/script_en/scena/mp0010_05.dat",
+            "resources/evo-voice-mod/script_en/scena/mp3010_01.dat",
             "resources/xseed-restoration/script_en/scena/mp1010_04.dat",
             "resources/xseed-restoration/script_en/scena/mp0010_05.dat",
+            "resources/xseed-restoration/script_en/scena/mp3010_01.dat",
             "resources/original/script_en/scena/mp1010_04.dat"
           )
           foreach ($f in $fixtures) {
