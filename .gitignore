@@ -2,9 +2,15 @@
 /output
 /dist
 
-# Decompiled scripts are regenerated from the .dat files via scripts/dat2ing.py.
-# Keep them out of git: they're large, text-heavy, and derivable.
-resources/**/*.ing
+# Resource corpora (the EVO and Xseed mods plus the original GungHo baseline) are
+# local-only build inputs. They are NOT redistributed via git: obtain them yourself
+# per the README "Compatibility" section and extract them here to build. Only the
+# folder skeleton (.gitkeep) is tracked; everything else under resources/ is ignored
+# (the .dat scripts, .tbl tables, regenerable .ing decompiles, and .pac archives).
+resources/**
+!resources/**/
+!resources/**/.gitkeep
 
-# Ignore packed .pac binary files from the game
-resources/**/*.pac
+# Decompiled .ing of the committed test fixtures (.dat). Derived; regenerated
+# via scripts/dat2ing.py (`just dat2ing`).
+sora-remake-merge/tests/fixtures/**/*.ing

@@ -1,4 +1,7 @@
 use crate::anchor::AnchorKey;
+use crate::anchor::Classification;
+use crate::anchor::classify_named_call_call;
+use crate::anchor::classify_named_call_expr;
 use crate::anchor::classify_syscall_call;
 use crate::anchor::classify_syscall_expr;
 use crate::text_run::TextRun;
@@ -68,25 +71,50 @@ fn rewrite_stmt(stmt: &mut Stmt, v: &mut impl Visitor) {
     }
 }
 
+/// Apply a classified swap to a syscall/call arg list. Splices the text run in
+/// place: drops `args[prefix_len..run_end]`, inserts the new run, and
+/// re-appends the preserved tail (numeric coords for map names; empty for
+/// dialogue, where `run_end == args.len()`).
+fn swap_run_expr(
+    args: &mut Vec<Expr>,
+    cls: &Classification,
+    line: Option<u16>,
+    v: &mut impl Visitor,
+) {
+    let run_end = match cls.run_len {
+        Some(n) => cls.prefix_len + n,
+        None => args.len(),
+    };
+    if let Some(rest) = args.get(cls.prefix_len..run_end)
+        && let Some(evo_run) = extract_run_expr(rest)
+        && let Some(new_run) = v.on_syscall(Site::Body, line, &cls.key, &evo_run)
+        && new_run != evo_run
+    {
+        let tail = args.split_off(run_end);
+        args.truncate(cls.prefix_len);
+        args.extend(build_run_expr(&new_run));
+        args.extend(tail);
+    }
+}
+
 fn rewrite_expr(expr: &mut Expr, v: &mut impl Visitor) {
     match expr {
         Expr::Syscall(line, a, b, args) => {
             for arg in args.iter_mut() {
                 rewrite_expr(arg, v);
             }
-            if let Some(cls) = classify_syscall_expr(*a, *b, args)
-                && let Some(rest) = args.get(cls.prefix_len..)
-                && let Some(evo_run) = extract_run_expr(rest)
-                && let Some(new_run) = v.on_syscall(Site::Body, *line, &cls.key, &evo_run)
-                && new_run != evo_run
-            {
-                args.truncate(cls.prefix_len);
-                args.extend(build_run_expr(&new_run));
+            if let Some(cls) = classify_syscall_expr(*a, *b, args) {
+                swap_run_expr(args, &cls, *line, v);
             }
         }
-        Expr::Call(_, _, args) => {
-            for arg in args {
+        Expr::Call(line, name, args) => {
+            for arg in args.iter_mut() {
                 rewrite_expr(arg, v);
+            }
+            // Map-name labels (`ui_mapname_effect`) are named prelude-alias
+            // calls, not raw syscalls.
+            if let Some(cls) = classify_named_call_expr(name, args) {
+                swap_run_expr(args, &cls, *line, v);
             }
         }
         Expr::Unop(_, _, inner) => rewrite_expr(inner, v),
@@ -100,15 +128,25 @@ fn rewrite_expr(expr: &mut Expr, v: &mut impl Visitor) {
 
 pub fn rewrite_called(calls: &mut [Call], visitor: &mut impl Visitor) {
     for call in calls {
-        if matches!(call.kind, CallKind::Syscall(_, _))
-            && let Some(cls) = classify_syscall_call(&call.kind, &call.args)
-            && let Some(rest) = call.args.get(cls.prefix_len..)
+        let cls = match &call.kind {
+            CallKind::Syscall(..) => classify_syscall_call(&call.kind, &call.args),
+            CallKind::Normal(name) => classify_named_call_call(name, &call.args),
+            CallKind::Tailcall(_) => None,
+        };
+        let Some(cls) = cls else { continue };
+        let run_end = match cls.run_len {
+            Some(n) => cls.prefix_len + n,
+            None => call.args.len(),
+        };
+        if let Some(rest) = call.args.get(cls.prefix_len..run_end)
             && let Some(evo_run) = extract_run_call(rest)
             && let Some(new_run) = visitor.on_syscall(Site::Called, None, &cls.key, &evo_run)
             && new_run != evo_run
         {
+            let tail = call.args.split_off(run_end);
             call.args.truncate(cls.prefix_len);
             call.args.extend(build_run_call(&new_run));
+            call.args.extend(tail);
         }
     }
 }

@@ -15,33 +15,77 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
 
+// Fixtures are committed `.dat` under tests/fixtures/, decompiled to `.ing` by
+// `scripts/dat2ing.py` (the `.ing` are gitignored, like the resource corpora).
+// They are copies of the EVO/Xseed/original corpora for the specific files the
+// tests exercise, so the suite runs without the (untracked) resources/ tree.
 const EVO_MP1010_04: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../resources/evo-voice-mod/script_en/scena/mp1010_04.ing"
+    "/tests/fixtures/evo-voice-mod/mp1010_04.ing"
 );
 const XSEED_MP1010_04: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../resources/xseed-restoration/script_en/scena/mp1010_04.ing"
+    "/tests/fixtures/xseed-restoration/mp1010_04.ing"
 );
 const EVO_MP0010_05: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../resources/evo-voice-mod/script_en/scena/mp0010_05.ing"
+    "/tests/fixtures/evo-voice-mod/mp0010_05.ing"
 );
 const XSEED_MP0010_05: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../resources/xseed-restoration/script_en/scena/mp0010_05.ing"
+    "/tests/fixtures/xseed-restoration/mp0010_05.ing"
 );
 const ORIGINAL_MP1010_04: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../resources/original/script_en/scena/mp1010_04.ing"
+    "/tests/fixtures/original/mp1010_04.ing"
 );
 const EVO_MP3010_01: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../resources/evo-voice-mod/script_en/scena/mp3010_01.ing"
+    "/tests/fixtures/evo-voice-mod/mp3010_01.ing"
 );
 const XSEED_MP3010_01: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../resources/xseed-restoration/script_en/scena/mp3010_01.ing"
+    "/tests/fixtures/xseed-restoration/mp3010_01.ing"
+);
+const EVO_MP3030: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/evo-voice-mod/mp3030.ing"
+);
+const XSEED_MP3030: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/xseed-restoration/mp3030.ing"
+);
+const EVO_MP0000_EV: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/evo-voice-mod/mp0000_ev.ing"
+);
+const XSEED_MP0000_EV: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/xseed-restoration/mp0000_ev.ing"
+);
+const EVO_MP1000_EV: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/evo-voice-mod/mp1000_ev.ing"
+);
+const XSEED_MP1000_EV: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/xseed-restoration/mp1000_ev.ing"
+);
+const EVO_MP1110: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/evo-voice-mod/mp1110.ing"
+);
+const XSEED_MP1110: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/xseed-restoration/mp1110.ing"
+);
+const EVO_MP4000_EV: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/evo-voice-mod/mp4000_ev.ing"
+);
+const XSEED_MP4000_EV: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/xseed-restoration/mp4000_ev.ing"
 );
 const INGERT_ENV: &str = "INGERT_EXE";
 
@@ -60,10 +104,10 @@ fn read(path: &str) -> String {
     fs::read_to_string(path).unwrap_or_else(|e| {
         panic!(
             "read {path}: {e}\n\
-             hint: .ing fixtures are gitignored. Regenerate from .dat with:\n  \
-             python scripts/dat2ing.py resources/evo-voice-mod\n  \
-             python scripts/dat2ing.py resources/xseed-restoration\n  \
-             python scripts/dat2ing.py resources/original"
+             hint: .ing fixtures are gitignored. Regenerate from the committed \
+             .dat with:\n  \
+             python scripts/dat2ing.py sora-remake-merge/tests/fixtures\n  \
+             (or `just dat2ing`)"
         )
     })
 }
@@ -176,6 +220,27 @@ fn cassius_letter_voiced_swapped() {
         let needle = format!(", {v},");
         assert!(out.contains(&needle), "voice id {v} must survive in output");
     }
+}
+
+// === mp1010_04: Xseed v1.5 dialogue edits ===
+//
+// v1.5 re-translated four Lugran/Estelle lines. Three use `<#E` portraits;
+// Lugran's 34793 uses a `<#L` portrait, which only merges once the classifier
+// recognises non-`<#E` face sets.
+#[test]
+fn mp1010_04_v15_dialogue_swapped() {
+    let out = apply_swap_mp1010_04();
+    // Lugran 34793 ("<#L_0#G[2]#M_2#B_0>"): EVO "Wait..." -> Xseed v1.5 wording.
+    assert!(
+        out.contains("N-Now hold on... Maybe I'm not in"),
+        "missing v1.5 Lugran wording (non-<#E portrait not merged?)"
+    );
+    assert!(out.contains("11, 34793"), "voice id 34793 must survive");
+    // Estelle 34871 ("<#E_E#M_2#B_0>").
+    assert!(
+        out.contains("That voice sounds suspiciously"),
+        "missing v1.5 Estelle wording"
+    );
 }
 
 fn assert_idempotent(evo_path: &str, xseed_path: &str) {
@@ -406,5 +471,111 @@ fn mp3010_01_output_recompiles_via_ingert() {
     assert!(
         ok,
         "ingert.exe failed to recompile mp3010_01 output (asm→tree substitution may have broken)"
+    );
+}
+
+// === mp3030: ui_mapname_effect (system[22,38]) zone-label merge ===
+//
+// Xseed v1.5 retitled "Kaldia Limestone Cave" to "Limestone Cave". The
+// on-screen zone label is a named prelude-alias call (`ui_mapname_effect`), not
+// a raw syscall, and its string is followed by numeric coordinates that must
+// survive the swap. mp3030 carries the call in both the called-table metadata
+// and the body, so both occurrences must swap.
+
+#[test]
+fn mp3030_mapname_zone_retitle_swapped() {
+    let out = apply_swap(EVO_MP3030, XSEED_MP3030);
+    assert!(
+        out.contains("ui_mapname_effect(\"Limestone Cave\""),
+        "missing Xseed v1.5 zone retitle"
+    );
+    // Only the map *label* is renamed; "Kaldia Limestone Cave" legitimately
+    // survives in unchanged dialogue ("So... the Kaldia Limestone Cave."), so
+    // assert specifically that no map-name call keeps the old label.
+    assert!(
+        !out.contains("ui_mapname_effect(\"Kaldia Limestone Cave\""),
+        "old zone label still present on a ui_mapname_effect call"
+    );
+    assert!(
+        out.contains("ui_mapname_effect(\"Limestone Cave\", 110.0, 505.0, 5.0)"),
+        "map-name coordinates were not preserved through the swap"
+    );
+    let count = out.matches("ui_mapname_effect(\"Limestone Cave\"").count();
+    assert!(
+        count >= 2,
+        "expected >=2 swapped occurrences (metadata + body), got {count}"
+    );
+}
+
+#[test]
+fn idempotent_mp3030() {
+    assert_idempotent(EVO_MP3030, XSEED_MP3030);
+}
+
+#[test]
+fn mp3030_output_recompiles_via_ingert() {
+    let out = apply_swap(EVO_MP3030, XSEED_MP3030);
+    let tmp = write_tmp_ing("mp3030", &out);
+    let ok = ingert_recompile(&tmp);
+    let _ = fs::remove_file(&tmp);
+    let _ = fs::remove_file(tmp.with_extension("dat"));
+    assert!(ok, "ingert.exe failed to recompile mp3030 output");
+}
+
+// === Xseed v1.5 zone retitles across the remaining affected files ===
+//
+// Each of these files changed only a ui_mapname_effect label in v1.5. Assert
+// the new label is on the merged map-name call and the old one is gone from it.
+fn assert_mapname_retitle(evo_path: &str, xseed_path: &str, old_label: &str, new_label: &str) {
+    let out = apply_swap(evo_path, xseed_path);
+    let new_call = format!("ui_mapname_effect(\"{new_label}\"");
+    let old_call = format!("ui_mapname_effect(\"{old_label}\"");
+    assert!(
+        out.contains(&new_call),
+        "{evo_path}: missing v1.5 zone label {new_label:?}"
+    );
+    assert!(
+        !out.contains(&old_call),
+        "{evo_path}: old zone label {old_label:?} still on a map-name call"
+    );
+}
+
+#[test]
+fn mp0000_ev_mapname_retitle() {
+    assert_mapname_retitle(
+        EVO_MP0000_EV,
+        XSEED_MP0000_EV,
+        "Jade Tower",
+        "Esmelas Tower",
+    );
+}
+
+#[test]
+fn mp1000_ev_mapname_retitle() {
+    assert_mapname_retitle(
+        EVO_MP1000_EV,
+        XSEED_MP1000_EV,
+        "Amber Tower",
+        "Amberl Tower",
+    );
+}
+
+#[test]
+fn mp1110_mapname_retitle() {
+    assert_mapname_retitle(
+        EVO_MP1110,
+        XSEED_MP1110,
+        "Sky Pirate Stronghold",
+        "Sky Bandit Stronghold",
+    );
+}
+
+#[test]
+fn mp4000_ev_mapname_retitle() {
+    assert_mapname_retitle(
+        EVO_MP4000_EV,
+        XSEED_MP4000_EV,
+        "Royal Capital Grancel",
+        "City of Grancel",
     );
 }

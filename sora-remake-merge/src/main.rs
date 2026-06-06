@@ -260,6 +260,7 @@ fn fmt_key(key: &AnchorKey) -> String {
         AnchorKey::Voiced(v) => format!("Voiced({v})"),
         AnchorKey::Letter => "Letter".to_owned(),
         AnchorKey::Plain => "Plain".to_owned(),
+        AnchorKey::MapName => "MapName".to_owned(),
     }
 }
 

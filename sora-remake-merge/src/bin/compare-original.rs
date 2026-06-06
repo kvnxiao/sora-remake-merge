@@ -42,6 +42,7 @@ enum AnchorKind {
     Voiced,
     Letter,
     Plain,
+    MapName,
 }
 
 impl AnchorKind {
@@ -51,6 +52,7 @@ impl AnchorKind {
             AnchorKey::Voiced(_) => Self::Voiced,
             AnchorKey::Letter => Self::Letter,
             AnchorKey::Plain => Self::Plain,
+            AnchorKey::MapName => Self::MapName,
         }
     }
 }
