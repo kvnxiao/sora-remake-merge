@@ -74,6 +74,17 @@ pub fn is_localized_opcode(a: u8, b: u8) -> bool {
     matches!((a, b), (5, 0 | 6 | 8) | (22, 38))
 }
 
+/// A `[5,0]`/`[5,6]` portrait tag, e.g. `<#E_2#M_2#B_0>` or
+/// `<#L_0#G[2]#M_2#B_0>`. The leading letter is the face set (`E`, `L`, …); it
+/// is what distinguishes a portrait arg from an in-text control code like
+/// `<#123I>` (digit) or a text marker like `<K>`. Anchoring on only `<#E` would
+/// silently drop every line with another face set (e.g. Lugran's `<#L` lines).
+fn is_portrait_tag(s: &str) -> bool {
+    s.strip_prefix("<#")
+        .and_then(|rest| rest.chars().next())
+        .is_some_and(|c| c.is_ascii_uppercase())
+}
+
 #[must_use]
 pub fn classify_syscall_expr(a: u8, b: u8, args: &[Expr]) -> Option<Classification> {
     classify_generic(a, b, args, as_int_expr, as_string_expr, |arg| {
@@ -108,7 +119,7 @@ fn classify_generic<T>(
             let char_id = as_int(args.first()?)?;
             for (i, arg) in args.iter().enumerate().skip(1) {
                 if let Some(s) = as_string(arg)
-                    && s.starts_with("<#E")
+                    && is_portrait_tag(s)
                 {
                     return Some(Classification {
                         key: AnchorKey::Portrait {
@@ -297,6 +308,28 @@ mod tests {
             AnchorKey::Portrait {
                 char_id: 1,
                 tag: "<#E_2#M_2#B_0>".into()
+            }
+        );
+        assert_eq!(got.prefix_len, 4);
+    }
+
+    #[test]
+    fn portrait_non_e_face_set() {
+        // Lugran's "<#L_0#G[2]#M_2#B_0>" — a non-`<#E` portrait the old
+        // `<#E`-only check silently dropped (so its text never merged).
+        let args = vec![
+            iv(134),
+            iv(11),
+            iv(34793),
+            sv("<#L_0#G[2]#M_2#B_0>"),
+            sv("text"),
+        ];
+        let got = classify_syscall_expr(5, 6, &args).unwrap();
+        assert_eq!(
+            got.key,
+            AnchorKey::Portrait {
+                char_id: 134,
+                tag: "<#L_0#G[2]#M_2#B_0>".into()
             }
         );
         assert_eq!(got.prefix_len, 4);

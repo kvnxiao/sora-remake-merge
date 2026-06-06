@@ -145,11 +145,13 @@ Integration tests under `tests/e2e.rs` exercise the following:
 - Voice-line upgrade handling, exercising both the Letter→Voiced fallback (`mp1010_04.ing:EV_01_61_00`, voice IDs `97068` and `97069`) and the Plain→VoicedPlain shape (`mp3010_01.ing:QS308_01_00`, voice ID `97064`). Each test consequently asserts that the EVO voice IDs survive the swap and that Xseed's wording replaces the GungHo text.
 - `Body::Asm` substitution on `mp3010_01.ing:QS300_01_00`, including a subsequent recompile-via-Ingert check that verifies the substituted `Tree` body round-trips back to `.dat` cleanly.
 - Map-name (`ui_mapname_effect`) zone-label merging on `mp3030.ing` (Xseed v1.5 "Kaldia Limestone Cave" → "Limestone Cave"): both occurrences swap, the coordinates survive, the old label is gone from the call (while it legitimately remains in the unchanged dialogue line), and the output recompiles via Ingert.
+- The remaining v1.5 zone retitles — `mp0000_ev` (Jade → Esmelas Tower), `mp1000_ev` (Amber → Amberl Tower), `mp1110` (Sky Pirate → Sky Bandit Stronghold), `mp4000_ev` (Royal Capital Grancel → City of Grancel).
+- The v1.5 `mp1010_04` dialogue edits, including Lugran's `<#L` portrait line — which exercises non-`<#E` portrait anchoring (the `<#E`-only check would silently drop it).
 - Idempotency at the file level on `mp1010_04.ing`, `mp0010_05.ing`, `mp3010_01.ing`, and `mp3030.ing`, where a second run is verified to be a byte-identical no-op.
 - `mp0010_05.ing`, which is the file that originally failed to decompile in upstream Ingert and consequently motivated the fork. The test parses, swaps, and recompiles the result via `ingert.exe`, thereby catching any regression in the fork fix.
 - Read-only invariants on the Xseed and `original/` fixtures, which are verified to hash identically before and after a swap.
 
-The suite presently comprises 47 unit tests across the library modules and 23 integration tests against the committed fixtures.
+The suite presently comprises 48 unit tests across the library modules and 28 integration tests against the committed fixtures.
 
 ### Analysis binaries
 

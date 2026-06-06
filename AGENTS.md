@@ -69,7 +69,7 @@ For a `system[5,*]` call in EVO, find the matching Xseed call by:
 1. **File path** (relative path under `script_en/scena/` is identical across all three corpora).
 2. **Function name** (`fn FOO`).
 3. **Opcode-specific key**:
-   - `[5,0]` and `[5,6]`: `(char_id, portrait_tag)` — the `<#E_…#M_…#B_…>` string.
+   - `[5,0]` and `[5,6]`: `(char_id, portrait_tag)` — the `<#…>` portrait string. The face set is a letter (`E`, `L`, …), e.g. `<#E_2#M_2#B_0>` or `<#L_0#G[2]#M_2#B_0>`; matching only `<#E` would silently drop the others.
    - `[5,8]`: voice ID when present, else `(shape, position)` — see `docs/ARCHITECTURE.md` for details.
 4. **Structural position** within the function — for tie-breaking among calls that share the same key (the same character speaks twice with the same portrait in the same function).
 
