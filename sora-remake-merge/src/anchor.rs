@@ -2,20 +2,43 @@ use ingert::scena::Expr;
 use ingert::scena::Value;
 use ingert::scp::CallArg;
 use ingert::scp::CallKind;
+use ingert::scp::Name;
 use ingert::scp::Value as ScpValue;
+
+/// The prelude name ingert assigns to `system[22,38]`. Unlike the dialogue
+/// opcodes (emitted as raw `system[5,*]`), the map-name syscall is decompiled
+/// as this named alias, so its call sites are `Expr::Call` (body) and
+/// `CallKind::Normal` (metadata) rather than raw syscalls — matched by name.
+pub const MAPNAME_FN: &str = "ui_mapname_effect";
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum AnchorKey {
-    Portrait { char_id: i32, tag: String },
+    Portrait {
+        char_id: i32,
+        tag: String,
+    },
     Voiced(i32),
     Letter,
     Plain,
+    /// `ui_mapname_effect` (`system[22,38]`) on-screen zone label. It carries
+    /// no per-call key (no `char_id`, portrait, or voice ID), so it is matched
+    /// positionally within a function — the Nth EVO map-name call maps to the
+    /// Nth Xseed one.
+    MapName,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Classification {
     pub key: AnchorKey,
+    /// Number of leading args before the localized text run begins.
     pub prefix_len: usize,
+    /// Length of the text run, in args. `None` means the run extends to the
+    /// end of the arg list — the case for every dialogue opcode, where the
+    /// localized text is the suffix. `Some(n)` means the run is exactly `n`
+    /// args and everything after it is preserved verbatim — the case for
+    /// `ui_mapname_effect`, whose single string is followed by numeric
+    /// coordinates.
+    pub run_len: Option<usize>,
 }
 
 fn as_int_expr(e: &Expr) -> Option<i32> {
@@ -48,7 +71,7 @@ fn as_string_call(a: &CallArg) -> Option<&str> {
 
 #[must_use]
 pub fn is_localized_opcode(a: u8, b: u8) -> bool {
-    matches!((a, b), (5, 0 | 6 | 8))
+    matches!((a, b), (5, 0 | 6 | 8) | (22, 38))
 }
 
 #[must_use]
@@ -93,14 +116,59 @@ fn classify_generic<T>(
                             tag: s.to_owned(),
                         },
                         prefix_len: i + 1,
+                        run_len: None,
                     });
                 }
             }
             None
         }
         (5, 8) => classify_s58(args, &as_int, &is_string),
+        (22, 38) => classify_mapname(args, &is_string),
         _ => None,
     }
+}
+
+fn classify_mapname<T>(args: &[T], is_string: &impl Fn(&T) -> bool) -> Option<Classification> {
+    // ui_mapname_effect(str, num, num, num): the on-screen zone label is the
+    // single leading string. The trailing numeric coordinates are not text,
+    // so the run is exactly one arg and the coords are preserved verbatim.
+    if !is_string(args.first()?) {
+        return None;
+    }
+    Some(Classification {
+        key: AnchorKey::MapName,
+        prefix_len: 0,
+        run_len: Some(1),
+    })
+}
+
+/// Classify a named `Expr::Call` callee — currently only the
+/// `ui_mapname_effect` prelude alias for `system[22,38]`.
+#[must_use]
+pub fn classify_named_call_expr(name: &Name, args: &[Expr]) -> Option<Classification> {
+    classify_named(name, args, |a| {
+        matches!(a, Expr::Value(_, Value::String(_)))
+    })
+}
+
+/// Classify a named `CallKind::Normal` call in a called-table — the metadata
+/// counterpart of [`classify_named_call_expr`].
+#[must_use]
+pub fn classify_named_call_call(name: &Name, args: &[CallArg]) -> Option<Classification> {
+    classify_named(name, args, |a| {
+        matches!(a, CallArg::Value(ScpValue::String(_)))
+    })
+}
+
+fn classify_named<T>(
+    name: &Name,
+    args: &[T],
+    is_string: impl Fn(&T) -> bool,
+) -> Option<Classification> {
+    if name.as_local().is_none_or(|n| n.as_str() != MAPNAME_FN) {
+        return None;
+    }
+    classify_mapname(args, &is_string)
 }
 
 fn classify_s58<T>(
@@ -127,6 +195,7 @@ fn classify_s58<T>(
         return Some(Classification {
             key: AnchorKey::Voiced(v),
             prefix_len: 5,
+            run_len: None,
         });
     }
     if let (Some(a1), Some(a2), Some(a3)) = (args.get(1), args.get(2), args.get(3))
@@ -137,6 +206,7 @@ fn classify_s58<T>(
         return Some(Classification {
             key: AnchorKey::Letter,
             prefix_len: 3,
+            run_len: None,
         });
     }
     // [5,8]-voiced-plain: (65535, 11, V, strings...) — EVO upgrade of a Plain
@@ -151,6 +221,7 @@ fn classify_s58<T>(
         return Some(Classification {
             key: AnchorKey::Plain,
             prefix_len: 3,
+            run_len: None,
         });
     }
     if let Some(a1) = args.get(1)
@@ -159,6 +230,7 @@ fn classify_s58<T>(
         return Some(Classification {
             key: AnchorKey::Plain,
             prefix_len: 1,
+            run_len: None,
         });
     }
     None
@@ -301,6 +373,42 @@ mod tests {
         let got = classify_syscall_expr(5, 8, &args).unwrap();
         assert_eq!(got.key, AnchorKey::Plain);
         assert_eq!(got.prefix_len, 3);
+    }
+
+    #[test]
+    fn mapname_single_string_with_coords() {
+        // ui_mapname_effect("City of Grancel", 110.0, 600.0, 6.0). The coords
+        // are floats in real data; Ints stand in here since the classifier
+        // only requires args[0] to be a string and ignores the rest.
+        let args = vec![sv("City of Grancel"), iv(110), iv(600), iv(6)];
+        let got = classify_syscall_expr(22, 38, &args).unwrap();
+        assert_eq!(got.key, AnchorKey::MapName);
+        assert_eq!(got.prefix_len, 0);
+        assert_eq!(got.run_len, Some(1));
+    }
+
+    #[test]
+    fn mapname_requires_leading_string() {
+        let args = vec![iv(0), iv(110)];
+        assert!(classify_syscall_expr(22, 38, &args).is_none());
+    }
+
+    #[test]
+    fn named_mapname_call_classified() {
+        let args = vec![sv("Esmelas Tower"), iv(110), iv(505), iv(4)];
+        let got =
+            classify_named_call_expr(&Name::local("ui_mapname_effect".into()), &args).unwrap();
+        assert_eq!(got.key, AnchorKey::MapName);
+        assert_eq!(got.prefix_len, 0);
+        assert_eq!(got.run_len, Some(1));
+    }
+
+    #[test]
+    fn named_non_mapname_call_ignored() {
+        let args = vec![sv("x")];
+        assert!(
+            classify_named_call_expr(&Name::local("camera_set_calc_mode".into()), &args).is_none()
+        );
     }
 
     #[test]

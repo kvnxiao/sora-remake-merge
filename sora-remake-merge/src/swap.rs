@@ -1,4 +1,7 @@
 use crate::anchor::AnchorKey;
+use crate::anchor::Classification;
+use crate::anchor::classify_named_call_call;
+use crate::anchor::classify_named_call_expr;
 use crate::anchor::classify_syscall_call;
 use crate::anchor::classify_syscall_expr;
 use crate::text_run::TextRun;
@@ -13,6 +16,7 @@ use ingert::scena::Called;
 use ingert::scena::Function;
 use ingert::scena::Scena;
 use ingert::scp::Call;
+use ingert::scp::CallKind;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
@@ -122,7 +126,7 @@ fn evo_calls_have_voice_ids(called: &Called) -> bool {
             // VoicedPlain: (65535, 11, V, "…", …). Classified as Plain with
             // prefix_len 3 (vs 1 for regular Plain).
             AnchorKey::Plain => cls.prefix_len == 3 && is_int_11(1),
-            AnchorKey::Letter => false,
+            AnchorKey::Letter | AnchorKey::MapName => false,
         }
     })
 }
@@ -205,6 +209,18 @@ fn collect_body(stmts: &[ingert::scena::Stmt], b: &mut IndexBuilder) {
     }
 }
 
+fn index_run_expr(cls: Classification, args: &[ingert::scena::Expr], b: &mut IndexBuilder) {
+    let run_end = match cls.run_len {
+        Some(n) => cls.prefix_len + n,
+        None => args.len(),
+    };
+    if let Some(rest) = args.get(cls.prefix_len..run_end)
+        && let Some(run) = extract_run_expr(rest)
+    {
+        b.push(cls.key, run);
+    }
+}
+
 fn collect_expr(expr: &ingert::scena::Expr, b: &mut IndexBuilder) {
     use ingert::scena::Expr;
     match expr {
@@ -212,16 +228,16 @@ fn collect_expr(expr: &ingert::scena::Expr, b: &mut IndexBuilder) {
             for arg in args {
                 collect_expr(arg, b);
             }
-            if let Some(cls) = classify_syscall_expr(*a, *bb, args)
-                && let Some(rest) = args.get(cls.prefix_len..)
-                && let Some(run) = extract_run_expr(rest)
-            {
-                b.push(cls.key, run);
+            if let Some(cls) = classify_syscall_expr(*a, *bb, args) {
+                index_run_expr(cls, args, b);
             }
         }
-        Expr::Call(_, _, args) => {
+        Expr::Call(_, name, args) => {
             for arg in args {
                 collect_expr(arg, b);
+            }
+            if let Some(cls) = classify_named_call_expr(name, args) {
+                index_run_expr(cls, args, b);
             }
         }
         Expr::Unop(_, _, inner) => collect_expr(inner, b),
@@ -235,8 +251,17 @@ fn collect_expr(expr: &ingert::scena::Expr, b: &mut IndexBuilder) {
 
 fn collect_called(calls: &[Call], b: &mut IndexBuilder) {
     for call in calls {
-        if let Some(cls) = classify_syscall_call(&call.kind, &call.args)
-            && let Some(rest) = call.args.get(cls.prefix_len..)
+        let cls = match &call.kind {
+            CallKind::Syscall(..) => classify_syscall_call(&call.kind, &call.args),
+            CallKind::Normal(name) => classify_named_call_call(name, &call.args),
+            CallKind::Tailcall(_) => None,
+        };
+        let Some(cls) = cls else { continue };
+        let run_end = match cls.run_len {
+            Some(n) => cls.prefix_len + n,
+            None => call.args.len(),
+        };
+        if let Some(rest) = call.args.get(cls.prefix_len..run_end)
             && let Some(run) = extract_run_call(rest)
         {
             b.push(cls.key, run);
@@ -792,6 +817,58 @@ mod tests {
         let stats = swap_scena(&mut evo, &xseed);
         assert_eq!(stats.body_substitutions, 0);
         assert!(matches!(&evo.functions["F"].body, Body::Asm(_)));
+    }
+
+    fn mapname_call(name: &str) -> Expr {
+        // ui_mapname_effect("Name", 110, 505, 4). Int coords stand in for the
+        // real floats; the swap preserves the trailing args verbatim either way.
+        Expr::Syscall(None, 22, 38, vec![sv(name), iv(110), iv(505), iv(4)])
+    }
+
+    #[test]
+    fn mapname_swapped_positionally_preserving_coords() {
+        // Two identical map-name calls (mp1110 ships "Sky Pirate Stronghold"
+        // twice). Both swap to Xseed's v1.5 retitle; the numeric coords after
+        // the string survive untouched.
+        let evo_fn = make_fn(vec![
+            Stmt::Expr(mapname_call("Sky Pirate Stronghold")),
+            Stmt::Expr(mapname_call("Sky Pirate Stronghold")),
+        ]);
+        let xseed_fn = make_fn(vec![
+            Stmt::Expr(mapname_call("Sky Bandit Stronghold")),
+            Stmt::Expr(mapname_call("Sky Bandit Stronghold")),
+        ]);
+        let mut evo = make_scena("F", evo_fn);
+        let xseed = make_scena("F", xseed_fn);
+        let stats = swap_scena(&mut evo, &xseed);
+        assert_eq!(stats.swaps_applied, 2);
+        let Body::Tree(body) = &evo.functions["F"].body else {
+            unreachable!()
+        };
+        for stmt in body {
+            let Stmt::Expr(Expr::Syscall(_, 22, 38, args)) = stmt else {
+                unreachable!()
+            };
+            let Expr::Value(_, Value::String(name)) = &args[0] else {
+                unreachable!()
+            };
+            assert_eq!(name, "Sky Bandit Stronghold");
+            assert_eq!(args.len(), 4, "coords must be preserved");
+            assert!(matches!(&args[1], Expr::Value(_, Value::Int(110))));
+            assert!(matches!(&args[2], Expr::Value(_, Value::Int(505))));
+            assert!(matches!(&args[3], Expr::Value(_, Value::Int(4))));
+        }
+    }
+
+    #[test]
+    fn mapname_unchanged_label_is_noop() {
+        let evo_fn = make_fn(vec![Stmt::Expr(mapname_call("City of Rolent"))]);
+        let xseed_fn = make_fn(vec![Stmt::Expr(mapname_call("City of Rolent"))]);
+        let mut evo = make_scena("F", evo_fn);
+        let xseed = make_scena("F", xseed_fn);
+        let stats = swap_scena(&mut evo, &xseed);
+        assert_eq!(stats.swaps_applied, 0);
+        assert_eq!(stats.no_ops_equal, 1);
     }
 
     #[test]

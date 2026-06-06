@@ -61,18 +61,7 @@ jobs:
       - name: Decompile test fixtures (.dat -> .ing)
         shell: pwsh
         run: |
-          $fixtures = @(
-            "resources/evo-voice-mod/script_en/scena/mp1010_04.dat",
-            "resources/evo-voice-mod/script_en/scena/mp0010_05.dat",
-            "resources/evo-voice-mod/script_en/scena/mp3010_01.dat",
-            "resources/xseed-restoration/script_en/scena/mp1010_04.dat",
-            "resources/xseed-restoration/script_en/scena/mp0010_05.dat",
-            "resources/xseed-restoration/script_en/scena/mp3010_01.dat",
-            "resources/original/script_en/scena/mp1010_04.dat"
-          )
-          foreach ($f in $fixtures) {
-            python scripts/dat2ing.py $f
-            if ($LASTEXITCODE -ne 0) { throw "dat2ing failed for $f" }
-          }
+          python scripts/dat2ing.py sora-remake-merge/tests/fixtures
+          if ($LASTEXITCODE -ne 0) { throw "dat2ing failed for test fixtures" }
 
       - run: cargo test --workspace --all-features

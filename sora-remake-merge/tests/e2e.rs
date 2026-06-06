@@ -15,33 +15,45 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
 
+// Fixtures are committed `.dat` under tests/fixtures/, decompiled to `.ing` by
+// `scripts/dat2ing.py` (the `.ing` are gitignored, like the resource corpora).
+// They are copies of the EVO/Xseed/original corpora for the specific files the
+// tests exercise, so the suite runs without the (untracked) resources/ tree.
 const EVO_MP1010_04: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../resources/evo-voice-mod/script_en/scena/mp1010_04.ing"
+    "/tests/fixtures/evo-voice-mod/mp1010_04.ing"
 );
 const XSEED_MP1010_04: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../resources/xseed-restoration/script_en/scena/mp1010_04.ing"
+    "/tests/fixtures/xseed-restoration/mp1010_04.ing"
 );
 const EVO_MP0010_05: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../resources/evo-voice-mod/script_en/scena/mp0010_05.ing"
+    "/tests/fixtures/evo-voice-mod/mp0010_05.ing"
 );
 const XSEED_MP0010_05: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../resources/xseed-restoration/script_en/scena/mp0010_05.ing"
+    "/tests/fixtures/xseed-restoration/mp0010_05.ing"
 );
 const ORIGINAL_MP1010_04: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../resources/original/script_en/scena/mp1010_04.ing"
+    "/tests/fixtures/original/mp1010_04.ing"
 );
 const EVO_MP3010_01: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../resources/evo-voice-mod/script_en/scena/mp3010_01.ing"
+    "/tests/fixtures/evo-voice-mod/mp3010_01.ing"
 );
 const XSEED_MP3010_01: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../resources/xseed-restoration/script_en/scena/mp3010_01.ing"
+    "/tests/fixtures/xseed-restoration/mp3010_01.ing"
+);
+const EVO_MP3030: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/evo-voice-mod/mp3030.ing"
+);
+const XSEED_MP3030: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/xseed-restoration/mp3030.ing"
 );
 const INGERT_ENV: &str = "INGERT_EXE";
 
@@ -60,10 +72,10 @@ fn read(path: &str) -> String {
     fs::read_to_string(path).unwrap_or_else(|e| {
         panic!(
             "read {path}: {e}\n\
-             hint: .ing fixtures are gitignored. Regenerate from .dat with:\n  \
-             python scripts/dat2ing.py resources/evo-voice-mod\n  \
-             python scripts/dat2ing.py resources/xseed-restoration\n  \
-             python scripts/dat2ing.py resources/original"
+             hint: .ing fixtures are gitignored. Regenerate from the committed \
+             .dat with:\n  \
+             python scripts/dat2ing.py sora-remake-merge/tests/fixtures\n  \
+             (or `just dat2ing`)"
         )
     })
 }
@@ -407,4 +419,52 @@ fn mp3010_01_output_recompiles_via_ingert() {
         ok,
         "ingert.exe failed to recompile mp3010_01 output (asm→tree substitution may have broken)"
     );
+}
+
+// === mp3030: ui_mapname_effect (system[22,38]) zone-label merge ===
+//
+// Xseed v1.5 retitled "Kaldia Limestone Cave" to "Limestone Cave". The
+// on-screen zone label is a named prelude-alias call (`ui_mapname_effect`), not
+// a raw syscall, and its string is followed by numeric coordinates that must
+// survive the swap. mp3030 carries the call in both the called-table metadata
+// and the body, so both occurrences must swap.
+
+#[test]
+fn mp3030_mapname_zone_retitle_swapped() {
+    let out = apply_swap(EVO_MP3030, XSEED_MP3030);
+    assert!(
+        out.contains("ui_mapname_effect(\"Limestone Cave\""),
+        "missing Xseed v1.5 zone retitle"
+    );
+    // Only the map *label* is renamed; "Kaldia Limestone Cave" legitimately
+    // survives in unchanged dialogue ("So... the Kaldia Limestone Cave."), so
+    // assert specifically that no map-name call keeps the old label.
+    assert!(
+        !out.contains("ui_mapname_effect(\"Kaldia Limestone Cave\""),
+        "old zone label still present on a ui_mapname_effect call"
+    );
+    assert!(
+        out.contains("ui_mapname_effect(\"Limestone Cave\", 110.0, 505.0, 5.0)"),
+        "map-name coordinates were not preserved through the swap"
+    );
+    let count = out.matches("ui_mapname_effect(\"Limestone Cave\"").count();
+    assert!(
+        count >= 2,
+        "expected >=2 swapped occurrences (metadata + body), got {count}"
+    );
+}
+
+#[test]
+fn idempotent_mp3030() {
+    assert_idempotent(EVO_MP3030, XSEED_MP3030);
+}
+
+#[test]
+fn mp3030_output_recompiles_via_ingert() {
+    let out = apply_swap(EVO_MP3030, XSEED_MP3030);
+    let tmp = write_tmp_ing("mp3030", &out);
+    let ok = ingert_recompile(&tmp);
+    let _ = fs::remove_file(&tmp);
+    let _ = fs::remove_file(tmp.with_extension("dat"));
+    assert!(ok, "ingert.exe failed to recompile mp3030 output");
 }

@@ -10,8 +10,11 @@ default:
 
 # === Pipeline ===
 
-# Bootstrap: decompile .dat -> .ing for all three corpora under resources/
+# Bootstrap: decompile .dat -> .ing for the committed test fixtures (always
+# present) and, when present, the full corpora under resources/ (which are
+# local-only build inputs — empty dirs are skipped without error).
 dat2ing:
+    python scripts/dat2ing.py sora-remake-merge/tests/fixtures
     python scripts/dat2ing.py resources/evo-voice-mod
     python scripts/dat2ing.py resources/xseed-restoration
     python scripts/dat2ing.py resources/original

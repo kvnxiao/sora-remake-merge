@@ -6,6 +6,8 @@ pub mod walker;
 
 pub use anchor::AnchorKey;
 pub use anchor::Classification;
+pub use anchor::classify_named_call_call;
+pub use anchor::classify_named_call_expr;
 pub use anchor::classify_syscall_call;
 pub use anchor::classify_syscall_expr;
 pub use io::ParseError;

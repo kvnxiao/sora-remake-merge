@@ -10,3 +10,7 @@
 resources/**
 !resources/**/
 !resources/**/.gitkeep
+
+# Decompiled .ing of the committed test fixtures (.dat). Derived; regenerated
+# via scripts/dat2ing.py (`just dat2ing`).
+sora-remake-merge/tests/fixtures/**/*.ing

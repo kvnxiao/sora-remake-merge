@@ -37,11 +37,15 @@ Simple functions may omit the `calls { }` block entirely, or use `dup` (called-t
 
 ### Dialogue calls
 
-Three syscall opcodes carry localized text:
+Three syscall opcodes carry dialogue text:
 
 - `system[5,0](char_id, [voice_ids…], "<#E…>", ["<K>",] "text", 10, "text", …)` — message box
 - `system[5,6](char_id, [voice_ids…], "<#E…>", ["<K>",] "text", …)` — voiced/continuation message (identical shape to `[5,0]`)
 - `system[5,8](65535, [shape-specific prefix,] "text", …)` — narration; multiple shapes exist (parameter-only, plain, letter, voiced-letter)
+
+A fourth call carries the on-screen zone label, emitted by the decompiler as a named prelude alias rather than a raw syscall:
+
+- `ui_mapname_effect("text", x, y, scale)` (the alias for `system[22,38]`) — map-name label. The localized text is the single **leading** string; the trailing numeric coordinates are preserved. It has no `char_id`/portrait/voice key, so it is matched **positionally** within the function. Xseed v1.5 retitled several zones (e.g. "Sky Pirate Stronghold" → "Sky Bandit Stronghold", "Royal Capital Grancel" → "City of Grancel").
 
 Conventions inside the arg list:
 
@@ -171,7 +175,7 @@ For each pair `resources/evo-voice-mod/.../X.ing` ↔ `resources/xseed-restorati
 2. Look up the anchor in the Xseed index built for the same function. If absent, the line is EVO-only — leave it byte-identical.
 3. If present and the text runs differ as `Vec<String>`, replace EVO's string run with Xseed's.
 4. Apply the swap to every matching occurrence (calls-vs-body duplicates, flag-gated branch duplicates).
-5. Touch only the text strings inside matched `system[5,*]` calls. Opcodes, control flow, char IDs, portrait tags, voice IDs, numeric args, prelude declarations, and line annotations on non-text args are all off-limits.
+5. Touch only the text strings inside matched `system[5,*]` and `ui_mapname_effect` calls. Opcodes, control flow, char IDs, portrait tags, voice IDs, numeric args (including map-name coordinates), prelude declarations, and line annotations on non-text args are all off-limits.
 
 `docs/ARCHITECTURE.md` covers the N-to-M overflow rule for cases where EVO has more occurrences than Xseed within the same anchor key.
 
@@ -188,6 +192,6 @@ For each pair `resources/evo-voice-mod/.../X.ing` ↔ `resources/xseed-restorati
 - EVO-only additions are preserved verbatim.
 - Never modify anything under `resources/`. The merge writes to `output/`.
 - Never edit `.dat` directly.
-- Only the **text strings** inside `system[5,0]`, `[5,6]`, `[5,8]` calls change. Everything else is untouchable.
+- Only the **text strings** inside `system[5,0]`, `[5,6]`, `[5,8]`, and `ui_mapname_effect` (`system[22,38]`) calls change. Everything else is untouchable.
 - One Xseed line ↔ many EVO occurrences is the norm, not the exception. Always sweep the whole file.
 - When in doubt about a match, leave the EVO line alone and surface it for review.
