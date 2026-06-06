@@ -48,17 +48,10 @@ ing2dat:
 ing2dat-path PATH:
     python scripts/ing2dat.py "{{PATH}}"
 
-# EVO ships t_name.tbl byte-identically to original/, so Xseed's copy is the merged result
-# by definition (verified via KuroTools tbl2json/json2tbl round-trip — see README §"Auxiliary tables").
-# Copy Xseed's auxiliary tables verbatim into output/
-copy-aux:
-    python scripts/copy_aux.py
+# Full pipeline: merge, then recompile (assumes .ing fixtures already exist)
+all: merge ing2dat
 
-# Full pipeline: merge, copy aux tables, then recompile (assumes .ing fixtures already exist)
-all: merge copy-aux ing2dat
-
-# Bundle output/ into dist/sora-remake-merge.zip for release.
-# Includes script_en/**/*.dat and table_en/**/*.tbl; excludes .ing decompiles and _audit/.
+# Bundle merged script_en/**/*.dat into dist/sora-remake-merge.zip (tables excluded; see README Compatibility)
 bundle:
     python scripts/bundle_release.py
 
