@@ -43,6 +43,13 @@ compare-original:
 compare-xseed:
     cargo run --release --bin compare-xseed
 
+# Verify the localization-delta invariant across all three corpora: the merge
+# changes text exactly where Xseed differs from original/, and carries Xseed's
+# text there. Reports the documented exemptions (anchor-shape upgrades, asm
+# body substitutions) and exits non-zero on any real violation.
+verify-delta:
+    cargo run --release --bin verify-delta
+
 # Recompile merged .ing files in output/ back to .dat
 ing2dat:
     python scripts/ing2dat.py output

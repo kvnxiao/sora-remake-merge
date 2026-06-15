@@ -121,12 +121,26 @@ fn evo_calls_have_voice_ids(called: &Called) -> bool {
         };
         match cls.key {
             AnchorKey::Voiced(_) => true,
-            // Portrait+voice: (char_id, 11, V, "<#E…>", …).
-            AnchorKey::Portrait { .. } => is_int_11(1) && next_is_int(2),
+            // Portrait+voice: the `11, V` marker may sit before the portrait
+            // (`char_id, 11, V, "<#E…>"`) or after it (`char_id, "<#E…>", 11,
+            // V`). Scan the whole preserved prefix.
+            AnchorKey::Portrait { .. } => {
+                (1..cls.prefix_len).any(|i| is_int_11(i) && next_is_int(i + 1))
+            }
             // VoicedPlain: (65535, 11, V, "…", …). Classified as Plain with
             // prefix_len 3 (vs 1 for regular Plain).
             AnchorKey::Plain => cls.prefix_len == 3 && is_int_11(1),
-            AnchorKey::Letter | AnchorKey::MapName => false,
+            // Narration / Untagged: EVO may insert an `11, V` voice marker
+            // anywhere in the integer prefix (e.g. narration `26, 13, 11, V` or
+            // a variable-speaker line `var, 14, 15, 11, V`). Scan the preserved
+            // prefix for it.
+            AnchorKey::Narration(_) | AnchorKey::Untagged { .. } => {
+                (1..cls.prefix_len).any(|i| is_int_11(i) && next_is_int(i + 1))
+            }
+            AnchorKey::Letter
+            | AnchorKey::MapName
+            | AnchorKey::MenuItem
+            | AnchorKey::DisplayName { .. } => false,
         }
     })
 }
@@ -139,9 +153,9 @@ fn body_kind(body: &Body) -> &'static str {
     }
 }
 
-type Index = HashMap<(Site, AnchorKey), Vec<TextRun>>;
+pub(crate) type Index = HashMap<(Site, AnchorKey), Vec<TextRun>>;
 
-fn build_index(f: &Function) -> Index {
+pub(crate) fn build_index(f: &Function) -> Index {
     let mut idx: Index = HashMap::new();
     if let Body::Tree(stmts) = &f.body {
         let mut collector = IndexBuilder {
@@ -616,6 +630,136 @@ mod tests {
         }
     }
 
+    fn narrator_call(text: &str) -> Expr {
+        // system[5,6](65535, "text") — portrait-less narrator/system message.
+        Expr::Syscall(None, 5, 6, vec![iv(65535), sv(text)])
+    }
+    fn portrait_call_voice_after(char_id: i32, tag: &str, voice: i32, text: &str) -> Expr {
+        // (char_id, "<#E…>", 11, V, "text") — voice ID placed AFTER the portrait.
+        Expr::Syscall(
+            None,
+            5,
+            6,
+            vec![iv(char_id), sv(tag), iv(11), iv(voice), sv(text)],
+        )
+    }
+    fn var_speaker_voiced_call(voice: i32, text: &str) -> Expr {
+        // (var, 14, 15, 11, V, "text") — dynamic speaker, no portrait. char_id is
+        // a Var (as_int -> None) so it anchors as Untagged{None}; the voice ID
+        // stays in the preserved prefix.
+        Expr::Syscall(
+            None,
+            5,
+            6,
+            vec![
+                Expr::Var(None, ingert::scena::Place::Var(ingert::scena::Var(0))),
+                iv(14),
+                iv(15),
+                iv(11),
+                iv(voice),
+                sv(text),
+            ],
+        )
+    }
+
+    #[test]
+    fn portrait_less_narrator_swapped_positionally() {
+        // mp1110 EV_01_53_00 pattern: a 65535 narrator line with no portrait
+        // tag. It carries no per-call key, so it matches positionally within the
+        // Untagged{Some(65535)} bucket; the char_id is preserved.
+        let evo_fn = make_fn(vec![Stmt::Expr(narrator_call("Men can be heard talking."))]);
+        let xseed_fn = make_fn(vec![Stmt::Expr(narrator_call(
+            "The voices of some men can be heard.",
+        ))]);
+        let mut evo = make_scena("F", evo_fn);
+        let xseed = make_scena("F", xseed_fn);
+        let stats = swap_scena(&mut evo, &xseed);
+        assert_eq!(stats.swaps_applied, 1);
+        assert_eq!(stats.unmatched_evo_calls, 0);
+        let Body::Tree(body) = &evo.functions["F"].body else {
+            unreachable!()
+        };
+        let Stmt::Expr(Expr::Syscall(_, _, _, args)) = &body[0] else {
+            unreachable!()
+        };
+        // char_id 65535 preserved.
+        assert!(matches!(&args[0], Expr::Value(_, Value::Int(65535))));
+        let Expr::Value(_, Value::String(t)) = &args[1] else {
+            unreachable!()
+        };
+        assert_eq!(t, "The voices of some men can be heard.");
+    }
+
+    #[test]
+    fn voice_id_after_portrait_swapped_preserving_voice() {
+        // mp1110 EV_01_60_00 Bose line: the voice ID sits AFTER the portrait tag
+        // (2, "<#E…>", 11, 34731, "text"). The text run swaps; the voice ID
+        // survives in the preserved prefix between the tag and the text.
+        let evo_fn = make_fn(vec![Stmt::Expr(portrait_call_voice_after(
+            2,
+            "<#E_0#M_2#B_0>",
+            34731,
+            "For now, we should head back to the",
+        ))]);
+        let xseed_fn = make_fn(vec![Stmt::Expr(portrait_call_voice_after(
+            2,
+            "<#E_0#M_2#B_0>",
+            34731,
+            "In the meantime, let's get back to",
+        ))]);
+        let mut evo = make_scena("F", evo_fn);
+        let xseed = make_scena("F", xseed_fn);
+        let stats = swap_scena(&mut evo, &xseed);
+        assert_eq!(stats.swaps_applied, 1);
+        let Body::Tree(body) = &evo.functions["F"].body else {
+            unreachable!()
+        };
+        let Stmt::Expr(Expr::Syscall(_, _, _, args)) = &body[0] else {
+            unreachable!()
+        };
+        // Voice ID after the portrait preserved.
+        assert!(matches!(&args[2], Expr::Value(_, Value::Int(11))));
+        assert!(matches!(&args[3], Expr::Value(_, Value::Int(34731))));
+        let Expr::Value(_, Value::String(t)) = &args[4] else {
+            unreachable!()
+        };
+        assert_eq!(t, "In the meantime, let's get back to");
+    }
+
+    #[test]
+    fn variable_speaker_swapped_preserving_voice() {
+        // Portrait-less variable speaker (internal monologue): the char_id is a
+        // Var, so it anchors as Untagged{None} and matches positionally. The
+        // voice ID in the prefix survives the swap.
+        let evo_fn = make_fn(vec![Stmt::Expr(var_speaker_voiced_call(
+            30546,
+            "(EVO old monologue...)",
+        ))]);
+        let xseed_fn = make_fn(vec![Stmt::Expr(var_speaker_voiced_call(
+            30546,
+            "(I'm not going to make it in time...)",
+        ))]);
+        let mut evo = make_scena("F", evo_fn);
+        let xseed = make_scena("F", xseed_fn);
+        let stats = swap_scena(&mut evo, &xseed);
+        assert_eq!(stats.swaps_applied, 1);
+        assert_eq!(stats.unmatched_evo_calls, 0);
+        let Body::Tree(body) = &evo.functions["F"].body else {
+            unreachable!()
+        };
+        let Stmt::Expr(Expr::Syscall(_, _, _, args)) = &body[0] else {
+            unreachable!()
+        };
+        // Var speaker and voice-ID prefix preserved.
+        assert!(matches!(&args[0], Expr::Var(_, _)));
+        assert!(matches!(&args[3], Expr::Value(_, Value::Int(11))));
+        assert!(matches!(&args[4], Expr::Value(_, Value::Int(30546))));
+        let Expr::Value(_, Value::String(t)) = &args[5] else {
+            unreachable!()
+        };
+        assert_eq!(t, "(I'm not going to make it in time...)");
+    }
+
     fn s58_letter(text: &str) -> Expr {
         Expr::Syscall(None, 5, 8, vec![iv(65535), iv(19), iv(13), sv(text)])
     }
@@ -699,6 +843,150 @@ mod tests {
             unreachable!()
         };
         assert_eq!(t, "XSEED translated lyric");
+    }
+
+    fn s58_narration(prefix: &[i32], text: &str) -> Expr {
+        let mut args = vec![iv(65535)];
+        args.extend(prefix.iter().map(|&n| iv(n)));
+        args.push(sv(text));
+        Expr::Syscall(None, 5, 8, args)
+    }
+
+    #[test]
+    fn s58_narration_swapped_positionally() {
+        // Two device/UI panels (26, 13). Xseed re-translates both; the merge
+        // matches them positionally within the Narration([26, 13]) bucket.
+        let evo_fn = make_fn(vec![
+            Stmt::Expr(s58_narration(&[26, 13], "Orbal Fortune Machine")),
+            Stmt::Expr(s58_narration(&[26, 13], "Would you like a reading?")),
+        ]);
+        let xseed_fn = make_fn(vec![
+            Stmt::Expr(s58_narration(&[26, 13], "Orbal Compatibility Tester")),
+            Stmt::Expr(s58_narration(&[26, 13], "Begin test?")),
+        ]);
+        let mut evo = make_scena("F", evo_fn);
+        let xseed = make_scena("F", xseed_fn);
+        let stats = swap_scena(&mut evo, &xseed);
+        assert_eq!(stats.swaps_applied, 2);
+        assert_eq!(stats.unmatched_evo_calls, 0);
+        let Body::Tree(body) = &evo.functions["F"].body else {
+            unreachable!()
+        };
+        let texts: Vec<&str> = body
+            .iter()
+            .map(|s| {
+                let Stmt::Expr(Expr::Syscall(_, _, _, args)) = s else {
+                    unreachable!()
+                };
+                let Expr::Value(_, Value::String(t)) = &args[3] else {
+                    unreachable!()
+                };
+                t.as_str()
+            })
+            .collect();
+        assert_eq!(texts, vec!["Orbal Compatibility Tester", "Begin test?"]);
+    }
+
+    #[test]
+    fn s58_narration_evo_voice_id_preserved() {
+        // EVO inserts (11, V) on a device line: (65535, 26, 13, 11, V, "..."),
+        // which Xseed has unvoiced as (65535, 26, 13, "..."). The text swaps;
+        // the voice ID survives in the preserved prefix.
+        let evo_fn = make_fn(vec![Stmt::Expr(s58_narration(
+            &[26, 13, 11, 97148],
+            "Orbal Fortune Machine",
+        ))]);
+        let xseed_fn = make_fn(vec![Stmt::Expr(s58_narration(
+            &[26, 13],
+            "Orbal Compatibility Tester",
+        ))]);
+        let mut evo = make_scena("F", evo_fn);
+        let xseed = make_scena("F", xseed_fn);
+        let stats = swap_scena(&mut evo, &xseed);
+        assert_eq!(stats.swaps_applied, 1);
+        assert_eq!(stats.unmatched_evo_calls, 0);
+        let Body::Tree(body) = &evo.functions["F"].body else {
+            unreachable!()
+        };
+        let Stmt::Expr(Expr::Syscall(_, _, _, args)) = &body[0] else {
+            unreachable!()
+        };
+        assert!(matches!(&args[3], Expr::Value(_, Value::Int(11))));
+        assert!(matches!(&args[4], Expr::Value(_, Value::Int(97148))));
+        let Expr::Value(_, Value::String(t)) = &args[5] else {
+            unreachable!()
+        };
+        assert_eq!(t, "Orbal Compatibility Tester");
+    }
+
+    #[test]
+    fn s58_plain_trailing_terminator_preserved_on_swap() {
+        // Museum/exhibit entry ending in a `13` record terminator. The text
+        // swaps; the trailing 13 survives untouched.
+        let evo_fn = make_fn(vec![Stmt::Expr(Expr::Syscall(
+            None,
+            5,
+            8,
+            vec![iv(65535), sv("Outer Wall of the Tetracyclic Tower"), iv(13)],
+        ))]);
+        let xseed_fn = make_fn(vec![Stmt::Expr(Expr::Syscall(
+            None,
+            5,
+            8,
+            vec![
+                iv(65535),
+                sv("Tetracyclic Tower Outer Wall Segment"),
+                iv(13),
+            ],
+        ))]);
+        let mut evo = make_scena("F", evo_fn);
+        let xseed = make_scena("F", xseed_fn);
+        let stats = swap_scena(&mut evo, &xseed);
+        assert_eq!(stats.swaps_applied, 1);
+        let Body::Tree(body) = &evo.functions["F"].body else {
+            unreachable!()
+        };
+        let Stmt::Expr(Expr::Syscall(_, _, _, args)) = &body[0] else {
+            unreachable!()
+        };
+        let Expr::Value(_, Value::String(t)) = &args[1] else {
+            unreachable!()
+        };
+        assert_eq!(t, "Tetracyclic Tower Outer Wall Segment");
+        assert_eq!(args.len(), 3, "trailing terminator preserved");
+        assert!(matches!(&args[2], Expr::Value(_, Value::Int(13))));
+    }
+
+    #[test]
+    fn s58_parameterized_message_left_untouched() {
+        // (65535, 16, "Received ", 17, n, ".") — text split around a runtime
+        // value. Not localizable as a single run, so it is left byte-identical
+        // even when Xseed's wording differs.
+        let evo_fn = make_fn(vec![Stmt::Expr(Expr::Syscall(
+            None,
+            5,
+            8,
+            vec![iv(65535), iv(16), sv("Received "), iv(17), iv(208), sv(".")],
+        ))]);
+        let evo_orig = evo_fn.clone();
+        let xseed_fn = make_fn(vec![Stmt::Expr(Expr::Syscall(
+            None,
+            5,
+            8,
+            vec![iv(65535), iv(16), sv("Got "), iv(17), iv(208), sv(".")],
+        ))]);
+        let mut evo = make_scena("F", evo_fn);
+        let xseed = make_scena("F", xseed_fn);
+        let stats = swap_scena(&mut evo, &xseed);
+        assert_eq!(stats.swaps_applied, 0);
+        assert_eq!(stats.unmatched_evo_calls, 0, "skipped, not unmatched");
+        let Body::Tree(body) = &evo.functions["F"].body else {
+            unreachable!()
+        };
+        let Body::Tree(orig) = &evo_orig.body else {
+            unreachable!()
+        };
+        assert_eq!(body, orig);
     }
 
     #[test]
@@ -869,6 +1157,142 @@ mod tests {
         let stats = swap_scena(&mut evo, &xseed);
         assert_eq!(stats.swaps_applied, 0);
         assert_eq!(stats.no_ops_equal, 1);
+    }
+
+    fn menuitem_call(char_id: i32, label: &str, index: i32) -> Expr {
+        // menu_additem(char_id, "label", index) — a named prelude-alias call
+        // (like ui_mapname_effect), not a raw syscall. Drives the
+        // records-terminal topic headers.
+        Expr::Call(
+            None,
+            ingert::scp::Name::local("menu_additem".into()),
+            vec![iv(char_id), sv(label), iv(index)],
+        )
+    }
+
+    #[test]
+    fn menuitem_swapped_positionally_preserving_index() {
+        // mp3010_01 LP_Capel records headers: positional within the function,
+        // and the trailing menu-index arg survives the label swap.
+        let evo_fn = make_fn(vec![
+            Stmt::Expr(menuitem_call(1, "<c930>[History]", 0)),
+            Stmt::Expr(menuitem_call(2, "<c930>[Orbment]", 0)),
+        ]);
+        let xseed_fn = make_fn(vec![
+            Stmt::Expr(menuitem_call(1, "<c930>[Establishment]", 0)),
+            Stmt::Expr(menuitem_call(2, "<c930>[Orbments]", 0)),
+        ]);
+        let mut evo = make_scena("F", evo_fn);
+        let xseed = make_scena("F", xseed_fn);
+        let stats = swap_scena(&mut evo, &xseed);
+        assert_eq!(stats.swaps_applied, 2);
+        let Body::Tree(body) = &evo.functions["F"].body else {
+            unreachable!()
+        };
+        let labels: Vec<&str> = body
+            .iter()
+            .map(|s| {
+                let Stmt::Expr(Expr::Call(_, _, args)) = s else {
+                    unreachable!()
+                };
+                let Expr::Value(_, Value::String(t)) = &args[1] else {
+                    unreachable!()
+                };
+                // char_id and trailing index both preserved.
+                assert!(matches!(&args[0], Expr::Value(_, Value::Int(_))));
+                assert!(matches!(&args[2], Expr::Value(_, Value::Int(0))));
+                t.as_str()
+            })
+            .collect();
+        assert_eq!(labels, vec!["<c930>[Establishment]", "<c930>[Orbments]"]);
+    }
+
+    #[test]
+    fn menuitem_unchanged_label_is_noop() {
+        let evo_fn = make_fn(vec![Stmt::Expr(menuitem_call(2, "<c930>[Quartz]", 1))]);
+        let xseed_fn = make_fn(vec![Stmt::Expr(menuitem_call(2, "<c930>[Quartz]", 1))]);
+        let mut evo = make_scena("F", evo_fn);
+        let xseed = make_scena("F", xseed_fn);
+        let stats = swap_scena(&mut evo, &xseed);
+        assert_eq!(stats.swaps_applied, 0);
+        assert_eq!(stats.no_ops_equal, 1);
+    }
+
+    fn display_name_call(char_id: i32, name: &str) -> Expr {
+        // chr_set_display_name(char_id, "name") — a named prelude-alias call.
+        Expr::Call(
+            None,
+            ingert::scp::Name::local("chr_set_display_name".into()),
+            vec![iv(char_id), sv(name)],
+        )
+    }
+
+    fn display_names(scena: &Scena, function: &str) -> Vec<(i32, String)> {
+        let Body::Tree(body) = &scena.functions[function].body else {
+            unreachable!()
+        };
+        body.iter()
+            .map(|s| {
+                let Stmt::Expr(Expr::Call(_, _, args)) = s else {
+                    unreachable!()
+                };
+                let Expr::Value(_, Value::Int(c)) = &args[0] else {
+                    unreachable!()
+                };
+                let Expr::Value(_, Value::String(n)) = &args[1] else {
+                    unreachable!()
+                };
+                (*c, n.clone())
+            })
+            .collect()
+    }
+
+    #[test]
+    fn display_name_group_label_swapped_preserving_char_id() {
+        // mp0000_ev / mp4000_ev group labels: each name swaps to Xseed's wording
+        // and the leading char_id is preserved.
+        let evo_fn = make_fn(vec![
+            Stmt::Expr(display_name_call(0, "Scherazard, Kloe, & Estelle")),
+            Stmt::Expr(display_name_call(10066, "Lonnie, Dino, & Lyle")),
+        ]);
+        let xseed_fn = make_fn(vec![
+            Stmt::Expr(display_name_call(0, "Scherazard, Kloe, and Estelle")),
+            Stmt::Expr(display_name_call(10066, "Lonnie, Dino & Lyle")),
+        ]);
+        let mut evo = make_scena("F", evo_fn);
+        let xseed = make_scena("F", xseed_fn);
+        let stats = swap_scena(&mut evo, &xseed);
+        assert_eq!(stats.swaps_applied, 2);
+        assert_eq!(
+            display_names(&evo, "F"),
+            vec![
+                (0, "Scherazard, Kloe, and Estelle".to_owned()),
+                (10066, "Lonnie, Dino & Lyle".to_owned()),
+            ]
+        );
+    }
+
+    #[test]
+    fn display_name_keyed_by_char_id_not_position() {
+        // Xseed lists the two characters in the OPPOSITE order. Because the key
+        // is the char_id, each EVO name still matches its own character's slot —
+        // not whatever sits at the same position.
+        let evo_fn = make_fn(vec![
+            Stmt::Expr(display_name_call(5, "EVO five")),
+            Stmt::Expr(display_name_call(9, "EVO nine")),
+        ]);
+        let xseed_fn = make_fn(vec![
+            Stmt::Expr(display_name_call(9, "Xseed nine")),
+            Stmt::Expr(display_name_call(5, "Xseed five")),
+        ]);
+        let mut evo = make_scena("F", evo_fn);
+        let xseed = make_scena("F", xseed_fn);
+        let stats = swap_scena(&mut evo, &xseed);
+        assert_eq!(stats.swaps_applied, 2);
+        assert_eq!(
+            display_names(&evo, "F"),
+            vec![(5, "Xseed five".to_owned()), (9, "Xseed nine".to_owned())]
+        );
     }
 
     #[test]

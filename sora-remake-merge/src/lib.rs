@@ -2,6 +2,7 @@ pub mod anchor;
 pub mod io;
 pub mod swap;
 pub mod text_run;
+pub mod verify;
 pub mod walker;
 
 pub use anchor::AnchorKey;
@@ -20,4 +21,8 @@ pub use swap::UnmatchedEntry;
 pub use swap::swap_scena;
 pub use text_run::TextChunk;
 pub use text_run::TextRun;
+pub use verify::DeltaReport;
+pub use verify::Violation;
+pub use verify::ViolationKind;
+pub use verify::verify_scena;
 pub use walker::Site;

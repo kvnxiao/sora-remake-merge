@@ -257,10 +257,14 @@ fn fmt_key(key: &AnchorKey) -> String {
         AnchorKey::Portrait { char_id, tag } => {
             format!("Portrait(char_id={char_id}, tag={})", tsv_escape(tag))
         }
+        AnchorKey::Untagged { char_id } => format!("Untagged({char_id:?})"),
         AnchorKey::Voiced(v) => format!("Voiced({v})"),
         AnchorKey::Letter => "Letter".to_owned(),
         AnchorKey::Plain => "Plain".to_owned(),
+        AnchorKey::Narration(prefix) => format!("Narration({prefix:?})"),
         AnchorKey::MapName => "MapName".to_owned(),
+        AnchorKey::MenuItem => "MenuItem".to_owned(),
+        AnchorKey::DisplayName { char_id } => format!("DisplayName(char_id={char_id})"),
     }
 }
 
