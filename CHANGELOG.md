@@ -1,38 +1,38 @@
 # Changelog
 
-All notable changes to **sora-remake-merge** are documented here. The mod layers the [Xseed Restoration](https://www.nexusmods.com/trailsintheskyfirstchapter/mods/52) English text onto the [EVO Voice mod](https://www.nexusmods.com/trailsintheskyfirstchapter/mods/41) scripts, so each release is characterised primarily by the Xseed Restoration version whose edits it incorporates. See the README's [Compatibility](README.md#compatibility) section for the exact upstream versions a release targets.
+All notable changes to **sora-remake-merge**. The mod lays [Xseed Restoration](https://www.nexusmods.com/trailsintheskyfirstchapter/mods/52) English text onto the [EVO Voice mod](https://www.nexusmods.com/trailsintheskyfirstchapter/mods/41) scripts, so each release is keyed to the Xseed Restoration version it brings in. The README's [Compatibility](README.md#compatibility) section lists the exact upstream versions a release targets.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). "In-game changes" describe what a player sees differ in the game; "Tooling & internals" describe the merge tool itself.
+Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions use [Semantic Versioning](https://semver.org/spec/v2.0.0.html). "In-game changes" are what a player sees differ in the game; "Tooling & internals" cover the merge tool itself.
 
-## [1.2.0] — 2026-06-15 — targets Xseed Restoration v1.7
+## [1.2.0] - 2026-06-15 (targets Xseed Restoration v1.7)
 
-Brings the merge up to Xseed Restoration **v1.7** (from v1.5). Install Xseed Restoration v1.7 alongside this build; pairing it with v1.5 will leave the new text desynced.
+Updates the merge to Xseed Restoration **v1.7** (from v1.5). Install Xseed Restoration v1.7 with this build; pairing it with v1.5 leaves the new text desynced.
 
 ### In-game changes
 
-- **Zeiss orbal-records terminal headers** now carry Xseed v1.7's retitled topic headers — e.g. "[History]" → "[Establishment]", "[Orbment]" → "[Orbments]", "[Orbal Weapons]" → "[Orbal Weaponry]", "[All Orbal Technology]" → "[Universal Tech]", "[Other Information]" → "[Related Topics]", "[Internal Combustion Engine]" → "[Combustion Engine]", "[Orbal Automobile]" → "[Haulage Vehicle]" (the `menu_additem` topic menu in `mp3010_01`).
-- **Records / encyclopedia and on-screen narration** (`system[5,8]` signposts, device and terminal UIs, museum captions, and the records terminal) now follow Xseed v1.7's re-translations — e.g. "becomes the first factory chief" → "…Factory Chief". Voiced device lines (e.g. the Jenis Academy fortune-teller) keep their EVO voice cue.
-- **Narrator and system text without a portrait** (examine descriptions, `<C1>` story-recap screens, internal monologue) is now localised to Xseed's wording — e.g. in `mp1110`, "Men can be heard talking." → "The voices of some men can be heard."
-- **Combined-party speaker labels** are rephrased to Xseed's wording — "Lonnie, Dino, & Lyle" → "Lonnie, Dino & Lyle" and "Scherazard, Kloe, & Estelle" → "Scherazard, Kloe, and Estelle" (`chr_set_display_name`).
-- **Xseed v1.7's re-translated dialogue** is applied, including lines the previous merge missed — e.g. Lugran's `<#L` portrait line in `mp1010_04` ("N-Now hold on…") and Estelle's "That voice sounds suspiciously…".
-- **Inline `<C2>…</C>` colour markup** introduced by Xseed v1.7 (e.g. the tutorial glossary lines in `mp0010_05`) now rides through to the merged text intact.
+- **Zeiss orbal-records terminal headers** retitled to Xseed v1.7's wording: "[History]" → "[Establishment]", "[Orbment]" → "[Orbments]", "[Orbal Weapons]" → "[Orbal Weaponry]", "[All Orbal Technology]" → "[Universal Tech]", "[Other Information]" → "[Related Topics]", "[Internal Combustion Engine]" → "[Combustion Engine]", "[Orbal Automobile]" → "[Haulage Vehicle]" (the `menu_additem` topic menu in `mp3010_01`).
+- **Records, encyclopedia, and on-screen narration** (`system[5,8]` signposts, device and terminal UIs, museum captions, the records terminal) now follow Xseed v1.7's re-translations, e.g. "becomes the first factory chief" → "…Factory Chief". Voiced device lines such as the Jenis Academy fortune-teller keep their EVO voice cue.
+- **Narrator and system text without a portrait** (examine descriptions, `<C1>` story-recap screens, internal monologue) now uses Xseed's wording, e.g. in `mp1110`, "Men can be heard talking." → "The voices of some men can be heard."
+- **Combined-party speaker labels** rephrased to Xseed's wording: "Lonnie, Dino, & Lyle" → "Lonnie, Dino & Lyle" and "Scherazard, Kloe, & Estelle" → "Scherazard, Kloe, and Estelle" (`chr_set_display_name`).
+- **Xseed v1.7 dialogue edits** the earlier merge missed are now applied, including Lugran's `<#L` portrait line in `mp1010_04` ("N-Now hold on…") and Estelle's "That voice sounds suspiciously…".
+- **Inline `<C2>…</C>` colour markup** introduced by Xseed v1.7 (e.g. the tutorial glossary lines in `mp0010_05`) now carries through to the merged text intact.
 
 ### Tooling & internals
 
 - New `AnchorKey` shapes so the swap reaches the calls above: `Untagged` (portrait-less narrator / variable speaker, matched positionally per `char_id`), `Narration` (`[5,8]` integer-prefix narration, bucketed per prefix), `MenuItem` (`menu_additem` labels), and `DisplayName` (`chr_set_display_name`, keyed per `(function, char_id)`, integer `char_id` only).
 - The `Portrait` classifier now handles a voice ID placed *after* the portrait tag (`(2, "<#E…>", 11, 34731, …)`), keeping it in the preserved prefix.
 - `compare-original` and `compare-xseed` now classify and count the named prelude-alias calls (`MapName`, `MenuItem`, `DisplayName`) alongside the dialogue syscalls, so their anchor-distribution reports cover the full localizable surface.
-- New `verify-delta` binary (`just verify-delta`) and `verify` module assert the **localization-delta invariant** across all three corpora: the merged output differs from EVO exactly where Xseed differs from `original/`, and carries Xseed's text wherever it differs. A clean run reports zero violations with the documented exemptions (the `EV_01_61_00` Letter→Voiced upgrades and the `QS300_01_00` body substitution). The same invariant is asserted at fixture scale in the test suite.
+- New `verify-delta` binary (`just verify-delta`) and `verify` module assert the **localization-delta invariant** across all three corpora: the merged output differs from EVO exactly where Xseed differs from `original/`, and carries Xseed's text wherever it differs. A clean run reports zero violations, with only the documented exemptions (the `EV_01_61_00` Letter→Voiced upgrades and the `QS300_01_00` body substitution). The test suite asserts the same invariant at fixture scale.
 - Test fixtures for Xseed (`mp0010_05`, `mp3010_01`) bumped to v1.7.
 
-## [1.1.0] — 2026-06-06 — targets Xseed Restoration v1.5
+## [1.1.0] - 2026-06-06 (targets Xseed Restoration v1.5)
 
 First build to fully cover Xseed Restoration **v1.5**, adding the non-dialogue edits the initial release left untouched.
 
 ### In-game changes
 
-- **On-screen zone labels** (`ui_mapname_effect`) now use Xseed v1.5's retitled place names: "Jade Tower" → "Esmelas Tower", "Amber Tower" → "Amberl Tower", "Sky Pirate Stronghold" → "Sky Bandit Stronghold", "Kaldia Limestone Cave" → "Limestone Cave", and "Royal Capital Grancel" → "City of Grancel". The rename applies to the on-screen label only; a zone's old name may still appear in dialogue where Xseed left it unchanged.
-- **Dialogue with non-`<#E` portraits** (e.g. Lugran's `<#L` face set) is now localised; the earlier `<#E`-only anchor silently dropped these lines.
+- **On-screen zone labels** (`ui_mapname_effect`) now use Xseed v1.5's retitled place names: "Jade Tower" → "Esmelas Tower", "Amber Tower" → "Amberl Tower", "Sky Pirate Stronghold" → "Sky Bandit Stronghold", "Kaldia Limestone Cave" → "Limestone Cave", and "Royal Capital Grancel" → "City of Grancel". Only the on-screen label changes; a zone's old name may still appear in dialogue where Xseed left it unchanged.
+- **Dialogue with non-`<#E` portraits** (e.g. Lugran's `<#L` face set) now localised; the earlier `<#E`-only anchor silently dropped these lines.
 
 ### Tooling & internals
 
@@ -40,7 +40,7 @@ First build to fully cover Xseed Restoration **v1.5**, adding the non-dialogue e
 - Portrait anchoring widened to accept any uppercase face-set letter, not just `<#E`.
 - Releases now ship **only the merged `script_en/**/*.dat` scripts**; the verbatim Xseed `table_en/t_name.tbl` is no longer redistributed (it loads from the player's Xseed install). The `resources/` corpora are untracked (local-only build inputs), and the test suite runs against committed `.dat` fixtures under `tests/fixtures/`.
 
-## [1.0.0] — 2026-05-18
+## [1.0.0] - 2026-05-18
 
 Initial release: the core EVO ↔ Xseed text merge.
 
@@ -50,7 +50,7 @@ Initial release: the core EVO ↔ Xseed text merge.
 
 ### Tooling & internals
 
-- AST-based merge (parse → index → walk → print) over the `ingert-sora1` fork; `Portrait`, `Voiced`, `Letter`, and `Plain` anchors; whole-string-run replacement preserving voice IDs, char IDs, and portrait tags.
+- AST-based merge (parse, index, walk, print) over the `ingert-sora1` fork; `Portrait`, `Voiced`, `Letter`, and `Plain` anchors; whole-string-run replacement that preserves voice IDs, char IDs, and portrait tags.
 - Handling for EVO's structural divergences from the GungHo baseline: voice-ID insertions, `[5,8]` Letter→Voiced and Plain→VoicedPlain anchor-shape upgrades (via positional fallback), and `Body::Asm` body substitution.
 - Per-run audit logs (`unmatched.tsv`, `overflow.tsv`, `body_substitutions.tsv`) and the `compare-original` / `compare-xseed` analysis binaries.
 
