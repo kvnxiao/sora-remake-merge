@@ -55,4 +55,5 @@ Initial release: the core EVO ↔ Xseed text merge.
 - Per-run audit logs (`unmatched.tsv`, `overflow.tsv`, `body_substitutions.tsv`) and the `compare-original` / `compare-xseed` analysis binaries.
 
 [1.2.0]: https://github.com/kvnxiao/sora-remake-merge/releases/tag/v1.2.0
+[1.1.0]: https://github.com/kvnxiao/sora-remake-merge/releases/tag/v1.1.0
 [1.0.0]: https://github.com/kvnxiao/sora-remake-merge/releases/tag/v1.0.0
