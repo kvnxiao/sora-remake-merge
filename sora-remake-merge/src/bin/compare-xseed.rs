@@ -29,6 +29,7 @@ use ingert::scena::Expr;
 use ingert::scena::Function;
 use ingert::scena::Stmt;
 use sora_remake_merge::AnchorKey;
+use sora_remake_merge::classify_named_call_expr;
 use sora_remake_merge::classify_syscall_expr;
 use sora_remake_merge::parse_ing;
 use std::collections::HashMap;
@@ -48,20 +49,28 @@ struct FnCounts {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum AnchorKind {
     Portrait,
+    Untagged,
     Voiced,
     Letter,
     Plain,
+    Narration,
     MapName,
+    MenuItem,
+    DisplayName,
 }
 
 impl AnchorKind {
     fn from(key: &AnchorKey) -> Self {
         match key {
             AnchorKey::Portrait { .. } => Self::Portrait,
+            AnchorKey::Untagged { .. } => Self::Untagged,
             AnchorKey::Voiced(_) => Self::Voiced,
             AnchorKey::Letter => Self::Letter,
             AnchorKey::Plain => Self::Plain,
+            AnchorKey::Narration(_) => Self::Narration,
             AnchorKey::MapName => Self::MapName,
+            AnchorKey::MenuItem => Self::MenuItem,
+            AnchorKey::DisplayName { .. } => Self::DisplayName,
         }
     }
 }
@@ -118,9 +127,13 @@ fn walk_expr(expr: &Expr, out: &mut FnCounts) {
                 out.total += 1;
             }
         }
-        Expr::Call(_, _, args) => {
+        Expr::Call(_, name, args) => {
             for arg in args {
                 walk_expr(arg, out);
+            }
+            if let Some(cls) = classify_named_call_expr(name, args) {
+                *out.by_anchor.entry(AnchorKind::from(&cls.key)).or_default() += 1;
+                out.total += 1;
             }
         }
         Expr::Unop(_, _, inner) => walk_expr(inner, out),
@@ -151,27 +164,20 @@ fn count_fn(f: &Function) -> Option<FnCounts> {
 }
 
 fn fmt_anchor_dist(counts: &FnCounts) -> String {
-    let p = counts
-        .by_anchor
-        .get(&AnchorKind::Portrait)
-        .copied()
-        .unwrap_or(0);
-    let v = counts
-        .by_anchor
-        .get(&AnchorKind::Voiced)
-        .copied()
-        .unwrap_or(0);
-    let l = counts
-        .by_anchor
-        .get(&AnchorKind::Letter)
-        .copied()
-        .unwrap_or(0);
-    let pl = counts
-        .by_anchor
-        .get(&AnchorKind::Plain)
-        .copied()
-        .unwrap_or(0);
-    format!("Portrait={p}, Voiced={v}, Letter={l}, Plain={pl}")
+    let n = |kind: AnchorKind| counts.by_anchor.get(&kind).copied().unwrap_or(0);
+    format!(
+        "Portrait={}, Untagged={}, Voiced={}, Letter={}, Plain={}, Narration={}, \
+         MapName={}, MenuItem={}, DisplayName={}",
+        n(AnchorKind::Portrait),
+        n(AnchorKind::Untagged),
+        n(AnchorKind::Voiced),
+        n(AnchorKind::Letter),
+        n(AnchorKind::Plain),
+        n(AnchorKind::Narration),
+        n(AnchorKind::MapName),
+        n(AnchorKind::MenuItem),
+        n(AnchorKind::DisplayName),
+    )
 }
 
 fn run() -> Result<()> {

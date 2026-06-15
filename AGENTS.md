@@ -39,13 +39,16 @@ Simple functions may omit the `calls { }` block entirely, or use `dup` (called-t
 
 Three syscall opcodes carry dialogue text:
 
-- `system[5,0](char_id, [voice_ids…], "<#E…>", ["<K>",] "text", 10, "text", …)` — message box
+- `system[5,0](char_id, [voice_ids…], "<#E…>", [voice_ids…,] ["<K>",] "text", 10, "text", …)` — message box. The `11, V` voice ID usually sits before the portrait tag, but on a few lines sits **after** it (`(2, "<#E…>", 11, 34731, "text")`); either way it stays in the preserved prefix and the text run is the strings after the tag.
 - `system[5,6](char_id, [voice_ids…], "<#E…>", ["<K>",] "text", …)` — voiced/continuation message (identical shape to `[5,0]`)
-- `system[5,8](65535, [shape-specific prefix,] "text", …)` — narration; multiple shapes exist (parameter-only, plain, letter, voiced-letter)
+- **Portrait-less `[5,0]`/`[5,6]`** — narrator/system text (`char_id` 65535, e.g. examine descriptions and `<C1>` story-recap screens) and variable-speaker lines (a `Var` `char_id`, e.g. internal monologue) carry **no** `<#…>` portrait tag. With no per-call key they are matched **positionally**, bucketed by `char_id`: an integer channel vs. a `Var`. Any leading voice-ID prefix is preserved; the first string is the localized text.
+- `system[5,8](65535, [shape-specific prefix,] "text", …)` — narration; many shapes exist. The keyed shapes are parameter-only (no text, skipped), plain, letter, and voiced-letter. Beyond those, an integer-prefix-plus-text-run shape covers signposts (`65535, 13, …`), device/terminal UIs (`65535, 26, 13, …`), and records/encyclopedia entries (`65535, 26, 22, …` and `65535, 16, 26, 22, …`); these are matched **positionally within a per-prefix bucket** (the prefix excludes any EVO-added `11, V` voice cue). Some narration ends with a trailing `13` record terminator after the text, which is preserved. A parameterised shape whose text is split around a value placeholder (`65535, 16, "Received ", 17, n, ".")` is left untouched — it cannot be localized as one trailing run.
 
-A fourth call carries the on-screen zone label, emitted by the decompiler as a named prelude alias rather than a raw syscall:
+Further calls are emitted by the decompiler as named prelude aliases rather than raw syscalls:
 
 - `ui_mapname_effect("text", x, y, scale)` (the alias for `system[22,38]`) — map-name label. The localized text is the single **leading** string; the trailing numeric coordinates are preserved. It has no `char_id`/portrait/voice key, so it is matched **positionally** within the function. Xseed v1.5 retitled several zones (e.g. "Sky Pirate Stronghold" → "Sky Bandit Stronghold", "Royal Capital Grancel" → "City of Grancel").
+- `menu_additem(char_id, "text", index)` — menu-entry label, including the Zeiss orbal-records terminal's `<c930>[…]` topic headers. The localized text is the string at **arg 1**; the trailing menu-`index` (and the leading `char_id`) are preserved. Like map-name it has no per-call key, so it is matched **positionally** within the function. Xseed v1.7 retitled several records headers (e.g. "[History]" → "[Establishment]", "[Orbment]" → "[Orbments]", "[Orbal Weapons]" → "[Orbal Weaponry]").
+- `chr_set_display_name(char_id, "name")` — dialogue-box speaker label. The localized text is the string at **arg 1**. Unlike the other aliases it *does* carry a per-call key — the `char_id` — so it is matched **positionally within the `(function, char_id)` bucket**, and only when `char_id` is a concrete int (a `Var` slot for a dynamic speaker is left untouched). Xseed rephrased a couple of combined-party labels (e.g. "Lonnie, Dino, & Lyle" → "Lonnie, Dino & Lyle", "Scherazard, Kloe, & Estelle" → "…, and Estelle").
 
 Conventions inside the arg list:
 
@@ -55,7 +58,7 @@ Conventions inside the arg list:
 
 ### Voice IDs
 
-`[5,0]` and `[5,6]` calls often carry numeric args between `char_id` and the portrait tag, e.g. `system[5,0](134, 11, 33247, "<#E…>", …)`. The `11, <num>` pair is a **voice-line ID**. Two classes exist, both preserved verbatim:
+`[5,0]` and `[5,6]` calls often carry numeric args between `char_id` and the portrait tag, e.g. `system[5,0](134, 11, 33247, "<#E…>", …)` (and occasionally *after* the tag, `(2, "<#E…>", 11, 34731, …)`). The `11, <num>` pair is a **voice-line ID**. Two classes exist, both preserved verbatim:
 
 - **Original audio cues** — e.g. Lugran `11, 33247`, Cassius `11, 34832-34844`. Exist in `resources/original/`, `resources/xseed-restoration/`, and `resources/evo-voice-mod/`.
 - **EVO mod additions** — e.g. Joshua `11, 60589`, Estelle `11, 60593`. Exist only in `resources/evo-voice-mod/`.
@@ -69,8 +72,9 @@ For a `system[5,*]` call in EVO, find the matching Xseed call by:
 1. **File path** (relative path under `script_en/scena/` is identical across all three corpora).
 2. **Function name** (`fn FOO`).
 3. **Opcode-specific key**:
-   - `[5,0]` and `[5,6]`: `(char_id, portrait_tag)` — the `<#…>` portrait string. The face set is a letter (`E`, `L`, …), e.g. `<#E_2#M_2#B_0>` or `<#L_0#G[2]#M_2#B_0>`; matching only `<#E` would silently drop the others.
-   - `[5,8]`: voice ID when present, else `(shape, position)` — see `docs/ARCHITECTURE.md` for details.
+   - `[5,0]` and `[5,6]` **with a portrait**: `(char_id, portrait_tag)` — the `<#…>` portrait string. The face set is a letter (`E`, `L`, …), e.g. `<#E_2#M_2#B_0>` or `<#L_0#G[2]#M_2#B_0>`; matching only `<#E` would silently drop the others.
+   - `[5,0]` and `[5,6]` **with no portrait** (narrator/system or variable speaker): positional, bucketed by `char_id` — `(int channel, position)` or `(Var, position)`.
+   - `[5,8]`: voice ID when present (voiced-letter), else positional — `(letter shape, position)`, `(plain shape, position)`, or `(integer-prefix bucket, position)` for narration. See `docs/ARCHITECTURE.md` for details.
 4. **Structural position** within the function — for tie-breaking among calls that share the same key (the same character speaks twice with the same portrait in the same function).
 
 The match is **not** "same arg count" and **not** fuzzy string similarity. EVO may have extra voice-ID args; Xseed may have `<num>@` line annotations EVO lacks. Those are stripped from the anchor.
@@ -175,7 +179,7 @@ For each pair `resources/evo-voice-mod/.../X.ing` ↔ `resources/xseed-restorati
 2. Look up the anchor in the Xseed index built for the same function. If absent, the line is EVO-only — leave it byte-identical.
 3. If present and the text runs differ as `Vec<String>`, replace EVO's string run with Xseed's.
 4. Apply the swap to every matching occurrence (calls-vs-body duplicates, flag-gated branch duplicates).
-5. Touch only the text strings inside matched `system[5,*]` and `ui_mapname_effect` calls. Opcodes, control flow, char IDs, portrait tags, voice IDs, numeric args (including map-name coordinates), prelude declarations, and line annotations on non-text args are all off-limits.
+5. Touch only the text strings inside matched `system[5,*]`, `ui_mapname_effect`, `menu_additem`, and `chr_set_display_name` calls. Opcodes, control flow, char IDs, portrait tags, voice IDs, numeric args (including map-name coordinates and menu indices), prelude declarations, and line annotations on non-text args are all off-limits.
 
 `docs/ARCHITECTURE.md` covers the N-to-M overflow rule for cases where EVO has more occurrences than Xseed within the same anchor key.
 
@@ -192,6 +196,6 @@ For each pair `resources/evo-voice-mod/.../X.ing` ↔ `resources/xseed-restorati
 - EVO-only additions are preserved verbatim.
 - Never modify anything under `resources/`. The merge writes to `output/`.
 - Never edit `.dat` directly.
-- Only the **text strings** inside `system[5,0]`, `[5,6]`, `[5,8]`, and `ui_mapname_effect` (`system[22,38]`) calls change. Everything else is untouchable.
+- Only the **text strings** inside `system[5,0]`, `[5,6]`, `[5,8]`, `ui_mapname_effect` (`system[22,38]`), `menu_additem`, and `chr_set_display_name` calls change. Everything else is untouchable.
 - One Xseed line ↔ many EVO occurrences is the norm, not the exception. Always sweep the whole file.
 - When in doubt about a match, leave the EVO line alone and surface it for review.
