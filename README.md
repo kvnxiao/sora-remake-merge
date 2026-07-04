@@ -10,7 +10,7 @@ Each release is built against specific upstream versions. The merged scripts emb
 
 | Dependency | Version this release targets |
 | --- | --- |
-| [Xseed Restoration Mod](https://www.nexusmods.com/trailsintheskyfirstchapter/mods/52) | **v1.7** (full loose-files variant) |
+| [Xseed Restoration Mod](https://www.nexusmods.com/trailsintheskyfirstchapter/mods/52) | **v1.8** (full loose-files variant) |
 | [EVO Voice Mod](https://www.nexusmods.com/trailsintheskyfirstchapter/mods/41) | "Evo Voice Mod" + "GungHo v1.06.2 CLE v1.06.3" archives |
 | [Sora 1st Loose File Loader](https://www.nexusmods.com/trailsintheskyfirstchapter/mods/28) | latest |
 
@@ -24,7 +24,7 @@ A script overlay that sits on top of three other Nexus mods, installed in order.
 2. **[EVO Voice Mod](https://www.nexusmods.com/trailsintheskyfirstchapter/mods/41)** ships two archives from the mod page:
    - **"Evo Voice Mod"**: extract only `voice.pac` into `<GAME_ROOT>\pac\steam\`, overwriting the game's copy.
    - **"GungHo v1.06.2 CLE v1.06.3"**: extract into `<GAME_ROOT>\pac\steam\` as well, overwriting where prompted.
-3. **[Xseed Restoration Mod](https://www.nexusmods.com/trailsintheskyfirstchapter/mods/52)** (**v1.7**, full loose-files variant). Extract all of its folders (`asset\`, `asset_en\`, `script_en\`, `table_en\`) into `<GAME_ROOT>\`. This is where the localisation tables come from.
+3. **[Xseed Restoration Mod](https://www.nexusmods.com/trailsintheskyfirstchapter/mods/52)** (**v1.8**, full loose-files variant). Extract all of its folders (`asset\`, `asset_en\`, `script_en\`, `table_en\`) into `<GAME_ROOT>\`. This is where the localisation tables come from.
 4. **This mod.** Download `sora-remake-merge.zip` from [Releases](https://github.com/kvnxiao/sora-remake-merge/releases) and extract into `<GAME_ROOT>\`, overwriting the Xseed scripts from step 3. The zip holds only the merged `script_en\**\*.dat`, so it touches nothing else.
 
 Order matters. EVO's packed archives bring the audio cues plus GungHo text; Xseed's loose files shadow that text with better English; this mod re-applies Xseed's text to the EVO-voiced scripts so the voiced lines get it too. Install out of order and one of those layers goes stale.
