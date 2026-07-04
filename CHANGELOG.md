@@ -4,6 +4,24 @@ All notable changes to **sora-remake-merge**. The mod lays [Xseed Restoration](h
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions use [Semantic Versioning](https://semver.org/spec/v2.0.0.html). "In-game changes" are what a player sees differ in the game; "Tooling & internals" cover the merge tool itself.
 
+## [1.3.0] - 2026-07-03 (targets Xseed Restoration v1.8)
+
+Updates the merge to Xseed Restoration **v1.8** (from v1.7). Install Xseed Restoration v1.8 with this build; pairing it with an older version leaves the new text desynced. v1.8 is the mod author's broadest re-translation pass yet, and the existing anchors absorb it with no merge-tool changes.
+
+### In-game changes
+
+- **Xseed v1.8's re-translation carries onto the EVO-voiced scripts** across the large majority of scene scripts. Wherever v1.8 reworded a line that the EVO scripts voice, the merge re-applies v1.8's wording (e.g. in `mp2000_ev`, "W-Wow...!" → "I-Incredible...!").
+- **Dialogue-option / choice-menu text** now follows Xseed v1.8 (the `menu_additem` choice entries).
+- **System text and portrait-less narration** — examine descriptions, `<C1>` story-recap screens, internal monologue, and records/encyclopedia entries — re-translated to v1.8's wording.
+- **Character-name labels** updated to v1.8's spelling and punctuation, e.g. "Lonnie, Dino & Lyle" → "Lonnie, Dino, & Lyall" (`chr_set_display_name`).
+- **Inline `<C2>…</C>` colour markup** fixes from v1.8 ride through the merged text intact.
+- Xseed v1.8 also added dialogue **wait/pacing commands** to its patched lines. These are control flow, not text: the merge preserves EVO's own voice-driven pacing and carries only the wording, so v1.8's added waits are intentionally not applied.
+
+### Tooling & internals
+
+- No merge-tool changes. v1.8 is a text-refresh bump — regenerate the Xseed `.ing` (`just dat2ing`), re-run the merge, recompile (`just ing2dat`), and re-bundle (`just bundle`). `verify-delta` still reports zero violations across all three corpora, with only the documented exemptions (the `EV_01_61_00` Letter→Voiced upgrades and the `QS300_01_00` body substitution); `compare-xseed` reports no anchor-distribution drift.
+- Test fixtures stay at Xseed v1.7. They exercise the merge logic, which is unchanged; the shipped scripts are built from the v1.8 corpus regardless.
+
 ## [1.2.0] - 2026-06-15 (targets Xseed Restoration v1.7)
 
 Updates the merge to Xseed Restoration **v1.7** (from v1.5). Install Xseed Restoration v1.7 with this build; pairing it with v1.5 leaves the new text desynced.
@@ -54,6 +72,7 @@ Initial release: the core EVO ↔ Xseed text merge.
 - Handling for EVO's structural divergences from the GungHo baseline: voice-ID insertions, `[5,8]` Letter→Voiced and Plain→VoicedPlain anchor-shape upgrades (via positional fallback), and `Body::Asm` body substitution.
 - Per-run audit logs (`unmatched.tsv`, `overflow.tsv`, `body_substitutions.tsv`) and the `compare-original` / `compare-xseed` analysis binaries.
 
+[1.3.0]: https://github.com/kvnxiao/sora-remake-merge/releases/tag/v1.3.0
 [1.2.0]: https://github.com/kvnxiao/sora-remake-merge/releases/tag/v1.2.0
 [1.1.0]: https://github.com/kvnxiao/sora-remake-merge/releases/tag/v1.1.0
 [1.0.0]: https://github.com/kvnxiao/sora-remake-merge/releases/tag/v1.0.0
