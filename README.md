@@ -96,7 +96,7 @@ The merge is text-only. EVO adds no new dialogue lines relative to GungHo or Xse
 
 A few EVO quirks get special handling: voice-ID upgrades that re-shape some `[5,8]` lines, one function that only decompiles to asm (`mp3010_01.ing:QS300_01_00`, where Xseed's body is substituted whole), and voice IDs inserted around portrait tags. The anchor model and matching rules live in [`AGENTS.md`](AGENTS.md) and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md); the per-version text changes are in [`CHANGELOG.md`](CHANGELOG.md).
 
-Tables aren't merged or shipped. EVO never edits `table_en/` (its only table, `t_name.tbl`, is byte-identical to the original), so the Xseed tables you installed in step 3 are already correct.
+Tables aren't merged or shipped. EVO's `table_en.pac` carries the whole GungHo `table_en`, older wording and all, but the tables Xseed rewrites come in as loose files (step 3) that shadow EVO's copies at load time. Those differences are all localisation text, not voiced-audio data: even `t_active_voice.tbl` keeps the same entries and only rewords its subtitles. So your Xseed install already has the right text, and there's nothing to merge.
 
 ### Tests
 
