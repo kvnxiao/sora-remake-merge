@@ -61,9 +61,12 @@ ing2dat-path PATH:
 # Full pipeline: merge, then recompile (assumes .ing fixtures already exist)
 all: merge ing2dat
 
-# Bundle merged script_en/**/*.dat into dist/sora-remake-merge.zip (tables excluded; see README Compatibility)
-bundle:
+# Zip the existing output/**/*.dat without re-running the pipeline (assumes .dat are current)
+bundle-only:
     python scripts/bundle_release.py
+
+# Full pipeline (merge -> ing2dat) then zip, so the bundle never ships a stale .dat
+bundle: all bundle-only
 
 # === Dev ===
 

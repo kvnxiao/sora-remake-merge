@@ -13,10 +13,15 @@ use crate::walker::rewrite_body;
 use crate::walker::rewrite_called;
 use ingert::scena::Body;
 use ingert::scena::Called;
+use ingert::scena::Expr;
 use ingert::scena::Function;
 use ingert::scena::Scena;
+use ingert::scena::Stmt;
+use ingert::scena::Value;
 use ingert::scp::Call;
+use ingert::scp::CallArg;
 use ingert::scp::CallKind;
+use ingert::scp::Op;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
@@ -39,14 +44,17 @@ pub struct OverflowEntry {
 }
 
 /// Recorded when EVO's body is `Asm`/`Flat` (couldn't decompile to `Tree`)
-/// but Xseed's body is `Tree`, and EVO's calls-table has no voice IDs that
-/// would be lost by substitution. The swap layer replaces EVO's body with
-/// a clone of Xseed's so the runtime executes the Xseed text rather than
-/// the GungHo text embedded in EVO's asm bytecode.
+/// but Xseed's body is `Tree`. The swap layer replaces EVO's body with a
+/// clone of Xseed's so the runtime executes the Xseed text rather than the
+/// GungHo text embedded in EVO's asm bytecode. For an `Asm` body, any voice
+/// IDs EVO added in the bytecode are recovered and re-injected into the
+/// clone, so the substitution loses no audio; `voice_ids_reinjected` records
+/// how many.
 #[derive(Debug, Clone)]
 pub struct BodySubstitutionEntry {
     pub function: String,
     pub evo_body_kind: &'static str,
+    pub voice_ids_reinjected: usize,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -57,6 +65,7 @@ pub struct SwapStats {
     pub overflow_reuses: usize,
     pub voiced_to_letter_fallback: usize,
     pub body_substitutions: usize,
+    pub voice_ids_reinjected: usize,
     pub unmatched: Vec<UnmatchedEntry>,
     pub overflows: Vec<OverflowEntry>,
     pub body_subs: Vec<BodySubstitutionEntry>,
@@ -70,6 +79,7 @@ impl SwapStats {
         self.overflow_reuses += other.overflow_reuses;
         self.voiced_to_letter_fallback += other.voiced_to_letter_fallback;
         self.body_substitutions += other.body_substitutions;
+        self.voice_ids_reinjected += other.voice_ids_reinjected;
         self.unmatched.extend(other.unmatched);
         self.overflows.extend(other.overflows);
         self.body_subs.extend(other.body_subs);
@@ -372,24 +382,7 @@ fn swap_function(name: &str, evo: &mut Function, xseed: &Function, index: &Index
         counters: HashMap::new(),
         stats: SwapStats::default(),
     };
-    // Asm/Flat body substitution: when EVO's body couldn't be decompiled to
-    // Tree but Xseed's body could, and EVO has added no voice IDs in this
-    // function, clone Xseed's body into EVO. Without this, EVO retains
-    // GungHo text embedded in its asm bytecode (since the body walker only
-    // touches Tree bodies). The called-table swap alone doesn't reach the
-    // runtime since that block is metadata.
-    let needs_substitution = matches!(&evo.body, Body::Asm(_) | Body::Flat(_))
-        && matches!(&xseed.body, Body::Tree(_))
-        && !evo_calls_have_voice_ids(&evo.called);
-    if needs_substitution {
-        let evo_kind = body_kind(&evo.body);
-        evo.body = xseed.body.clone();
-        visitor.stats.body_substitutions += 1;
-        visitor.stats.body_subs.push(BodySubstitutionEntry {
-            function: name.to_owned(),
-            evo_body_kind: evo_kind,
-        });
-    }
+    substitute_body(name, evo, xseed, &mut visitor.stats);
     if let Body::Tree(stmts) = &mut evo.body {
         rewrite_body(stmts, &mut visitor);
     }
@@ -397,6 +390,339 @@ fn swap_function(name: &str, evo: &mut Function, xseed: &Function, index: &Index
         rewrite_called(calls, &mut visitor);
     }
     visitor.stats
+}
+
+/// A voice-ID pair recovered from an EVO `Body::Asm` dialogue call, so it can
+/// be re-injected into the cloned Xseed `Body::Tree` at the same position.
+#[derive(Debug, Clone, Copy)]
+struct VoiceInsert {
+    /// Arg index where the `11` marker sits (the value follows at `index + 1`).
+    index: usize,
+    /// The voice-line value that follows the `11` marker.
+    value: i32,
+}
+
+/// Body substitution for a non-`Tree` EVO body paired with a `Tree` Xseed body.
+///
+/// Ingert's tree-mode decompiler can't always lift EVO's bytecode to a `Tree`;
+/// the body walker only rewrites `Tree`, so left alone such a function keeps
+/// its GungHo text embedded in the bytecode. We clone Xseed's `Tree` in its
+/// place so the runtime executes Xseed's text.
+///
+/// For an `Asm` body this must not lose EVO's voice cues: EVO inserts them as
+/// `11, V` args in the bytecode, and Xseed's body has none. We recover the
+/// per-call voice IDs from the asm and re-inject them into the clone at the
+/// same positions. If the asm can't be parsed into literal args, we fall back
+/// to the calls-table gate (`evo_calls_have_voice_ids`): substitute only when
+/// EVO added no voice there either, otherwise leave the body untouched rather
+/// than drop audio. `Flat` bodies (no instances in the current corpus) take
+/// that same gated path.
+fn substitute_body(name: &str, evo: &mut Function, xseed: &Function, stats: &mut SwapStats) {
+    if !matches!(&xseed.body, Body::Tree(_)) {
+        return;
+    }
+    let evo_kind = body_kind(&evo.body);
+    let inserts = match &evo.body {
+        Body::Asm(ops) => extract_body_voice_ids(ops),
+        Body::Flat(_) => None,
+        Body::Tree(_) => return,
+    };
+    let record = |stats: &mut SwapStats, reinjected: usize| {
+        stats.body_substitutions += 1;
+        stats.voice_ids_reinjected += reinjected;
+        stats.body_subs.push(BodySubstitutionEntry {
+            function: name.to_owned(),
+            evo_body_kind: evo_kind,
+            voice_ids_reinjected: reinjected,
+        });
+    };
+    match inserts {
+        // Asm parsed cleanly and carries voice cues: clone Xseed's body, then
+        // re-inject the recovered voice IDs. Gate on the dialogue-call counts
+        // matching so positional injection can't misplace a cue; if they don't,
+        // leave EVO's body alone to preserve the audio.
+        Some(inserts) if inserts.iter().any(Option::is_some) => {
+            let Body::Tree(xseed_stmts) = &xseed.body else {
+                return;
+            };
+            if count_dialogue_syscalls(xseed_stmts) != inserts.len() {
+                return;
+            }
+            adopt_xseed_body(evo, xseed);
+            let reinjected = if let Body::Tree(stmts) = &mut evo.body {
+                inject_voice_ids(stmts, &inserts)
+            } else {
+                0
+            };
+            record(stats, reinjected);
+        }
+        // Asm parsed cleanly with no voice cues (or an empty body): a plain
+        // voiceless clone is faithful — there is no audio to preserve.
+        Some(_) => {
+            adopt_xseed_body(evo, xseed);
+            record(stats, 0);
+        }
+        // Couldn't parse the asm (or a Flat body): fall back to the calls-table
+        // gate. Substitute only if EVO added no voice there.
+        None => {
+            if !evo_calls_have_voice_ids(&evo.called) {
+                adopt_xseed_body(evo, xseed);
+                record(stats, 0);
+            }
+        }
+    }
+}
+
+/// Replace EVO's body *and* called-table with Xseed's, keeping the two from the
+/// same source. Ingert's `compile` writes a `Called::Raw` table to the `.dat`
+/// verbatim, with no check that it matches the code; pairing EVO's asm-derived
+/// raw table with Xseed's substituted `Tree` body yields a `.dat` whose called
+/// table disagrees with its body (e.g. `camera_lookat` arg counts differ),
+/// which the engine mis-reads and hangs on. Adopting Xseed's `Called::Merged`
+/// makes ingert re-infer the table from the (now Xseed) body at compile time,
+/// so it is always consistent. Voice IDs re-injected afterward live only in the
+/// body, mirroring how EVO ships voiced calls (voice in the body, not the table).
+fn adopt_xseed_body(evo: &mut Function, xseed: &Function) {
+    evo.body = xseed.body.clone();
+    evo.called = xseed.called.clone();
+}
+
+/// Recover per-dialogue-call voice IDs from an EVO `Body::Asm` op stream, in
+/// body order. Returns one entry per `system[5,{0,6,8}]` call (`Some` if it
+/// carries an `11, V` voice pair, `None` if unvoiced). Returns `None` for the
+/// whole function if any dialogue call's args can't be reconstructed from
+/// literal pushes, so the caller can fall back conservatively.
+fn extract_body_voice_ids(ops: &[Op]) -> Option<Vec<Option<VoiceInsert>>> {
+    let mut out = Vec::new();
+    for (i, op) in ops.iter().enumerate() {
+        let Op::CallSystem(a, b, argc) = op else {
+            continue;
+        };
+        if *a != 5 || !matches!(*b, 0 | 6 | 8) {
+            continue;
+        }
+        let call_args = reconstruct_call_args(ops, i, usize::from(*argc))?;
+        out.push(find_voice_pair(*a, *b, &call_args));
+    }
+    Some(out)
+}
+
+/// Reconstruct a syscall's argument list, in source order, by walking backward
+/// over the literal `Push` ops preceding the `CallSystem` at `call_idx`. Args
+/// are pushed in reverse, so the push nearest the call is `arg[0]`. Returns
+/// `None` if a non-literal operand (computed value, null) sits in the window —
+/// dialogue calls use only literal args, so that signals "leave this alone".
+fn reconstruct_call_args(ops: &[Op], call_idx: usize, argc: usize) -> Option<Vec<Value>> {
+    let mut vals = Vec::with_capacity(argc);
+    let mut i = call_idx;
+    while vals.len() < argc {
+        i = i.checked_sub(1)?;
+        match ops.get(i)? {
+            Op::Push(v) => vals.push(v.clone()),
+            // Labels and source-line markers don't touch the operand stack.
+            Op::Label(_) | Op::Line(_) => {}
+            _ => return None,
+        }
+    }
+    Some(vals)
+}
+
+/// Locate the `11, V` voice pair in a reconstructed dialogue-call arg list,
+/// bounded to the classified prefix so an in-text or trailing literal `11`
+/// can't be mistaken for a voice marker. Mirrors `evo_calls_have_voice_ids`.
+fn find_voice_pair(a: u8, b: u8, args: &[Value]) -> Option<VoiceInsert> {
+    let call_args: Vec<CallArg> = args.iter().cloned().map(CallArg::Value).collect();
+    let cls = classify_syscall_call(&CallKind::Syscall(a, b), &call_args)?;
+    for i in 1..cls.prefix_len {
+        if matches!(args.get(i), Some(Value::Int(11)))
+            && let Some(Value::Int(value)) = args.get(i + 1)
+        {
+            return Some(VoiceInsert {
+                index: i,
+                value: *value,
+            });
+        }
+    }
+    None
+}
+
+/// Count `system[5,{0,6,8}]` calls in a tree body, in the order
+/// [`inject_voice_ids`] visits them.
+fn count_dialogue_syscalls(stmts: &[Stmt]) -> usize {
+    let mut n = 0;
+    for stmt in stmts {
+        walk_dialogue_stmt(stmt, &mut |_| n += 1);
+    }
+    n
+}
+
+/// Inject recovered voice IDs into a cloned Xseed tree body. Visits
+/// `system[5,{0,6,8}]` calls in body order, matching `inserts` positionally,
+/// and splices `11, V` into each voiced call's args at the recorded index.
+/// Returns the number of calls that received a voice ID.
+fn inject_voice_ids(stmts: &mut [Stmt], inserts: &[Option<VoiceInsert>]) -> usize {
+    let mut idx = 0;
+    let mut injected = 0;
+    for stmt in stmts {
+        walk_dialogue_stmt_mut(stmt, &mut |args| {
+            let cur = idx;
+            idx += 1;
+            if let Some(vi) = inserts.get(cur).copied().flatten()
+                && vi.index <= args.len()
+            {
+                args.insert(vi.index, Expr::Value(None, Value::Int(vi.value)));
+                args.insert(vi.index, Expr::Value(None, Value::Int(11)));
+                injected += 1;
+            }
+        });
+    }
+    injected
+}
+
+/// Visit the arg list of every `system[5,{0,6,8}]` call in a statement, in
+/// source order (mirrors `walker::rewrite_stmt`). Immutable counting variant.
+fn walk_dialogue_stmt(stmt: &Stmt, f: &mut impl FnMut(&[Expr])) {
+    match stmt {
+        Stmt::Expr(e) | Stmt::Set(_, _, e) => walk_dialogue_expr(e, f),
+        Stmt::Return(_, e) | Stmt::PushVar(_, _, e) => {
+            if let Some(e) = e {
+                walk_dialogue_expr(e, f);
+            }
+        }
+        Stmt::If(_, cond, then, els) => {
+            walk_dialogue_expr(cond, f);
+            for s in then {
+                walk_dialogue_stmt(s, f);
+            }
+            if let Some(els) = els {
+                for s in els {
+                    walk_dialogue_stmt(s, f);
+                }
+            }
+        }
+        Stmt::While(_, cond, body) => {
+            walk_dialogue_expr(cond, f);
+            for s in body {
+                walk_dialogue_stmt(s, f);
+            }
+        }
+        Stmt::Switch(_, scrut, cases) => {
+            walk_dialogue_expr(scrut, f);
+            for arm in cases.values() {
+                for s in arm {
+                    walk_dialogue_stmt(s, f);
+                }
+            }
+        }
+        Stmt::Block(stmts) => {
+            for s in stmts {
+                walk_dialogue_stmt(s, f);
+            }
+        }
+        Stmt::Debug(_, args) | Stmt::Tailcall(_, _, args) => {
+            for a in args {
+                walk_dialogue_expr(a, f);
+            }
+        }
+        Stmt::Break | Stmt::Continue => {}
+    }
+}
+
+fn walk_dialogue_expr(expr: &Expr, f: &mut impl FnMut(&[Expr])) {
+    match expr {
+        Expr::Syscall(_, a, b, args) => {
+            for arg in args {
+                walk_dialogue_expr(arg, f);
+            }
+            if *a == 5 && matches!(*b, 0 | 6 | 8) {
+                f(args);
+            }
+        }
+        Expr::Call(_, _, args) => {
+            for arg in args {
+                walk_dialogue_expr(arg, f);
+            }
+        }
+        Expr::Unop(_, _, inner) => walk_dialogue_expr(inner, f),
+        Expr::Binop(_, _, l, r) => {
+            walk_dialogue_expr(l, f);
+            walk_dialogue_expr(r, f);
+        }
+        Expr::Value(_, _) | Expr::Var(_, _) | Expr::Ref(_, _) => {}
+    }
+}
+
+/// Mutable twin of [`walk_dialogue_stmt`]: hands each `system[5,{0,6,8}]`
+/// call's arg list to `f` for in-place editing, in the same source order.
+fn walk_dialogue_stmt_mut(stmt: &mut Stmt, f: &mut impl FnMut(&mut Vec<Expr>)) {
+    match stmt {
+        Stmt::Expr(e) | Stmt::Set(_, _, e) => walk_dialogue_expr_mut(e, f),
+        Stmt::Return(_, e) | Stmt::PushVar(_, _, e) => {
+            if let Some(e) = e {
+                walk_dialogue_expr_mut(e, f);
+            }
+        }
+        Stmt::If(_, cond, then, els) => {
+            walk_dialogue_expr_mut(cond, f);
+            for s in then.iter_mut() {
+                walk_dialogue_stmt_mut(s, f);
+            }
+            if let Some(els) = els {
+                for s in els.iter_mut() {
+                    walk_dialogue_stmt_mut(s, f);
+                }
+            }
+        }
+        Stmt::While(_, cond, body) => {
+            walk_dialogue_expr_mut(cond, f);
+            for s in body.iter_mut() {
+                walk_dialogue_stmt_mut(s, f);
+            }
+        }
+        Stmt::Switch(_, scrut, cases) => {
+            walk_dialogue_expr_mut(scrut, f);
+            for arm in cases.values_mut() {
+                for s in arm.iter_mut() {
+                    walk_dialogue_stmt_mut(s, f);
+                }
+            }
+        }
+        Stmt::Block(stmts) => {
+            for s in stmts.iter_mut() {
+                walk_dialogue_stmt_mut(s, f);
+            }
+        }
+        Stmt::Debug(_, args) | Stmt::Tailcall(_, _, args) => {
+            for a in args.iter_mut() {
+                walk_dialogue_expr_mut(a, f);
+            }
+        }
+        Stmt::Break | Stmt::Continue => {}
+    }
+}
+
+fn walk_dialogue_expr_mut(expr: &mut Expr, f: &mut impl FnMut(&mut Vec<Expr>)) {
+    match expr {
+        Expr::Syscall(_, a, b, args) => {
+            for arg in args.iter_mut() {
+                walk_dialogue_expr_mut(arg, f);
+            }
+            if *a == 5 && matches!(*b, 0 | 6 | 8) {
+                f(args);
+            }
+        }
+        Expr::Call(_, _, args) => {
+            for arg in args.iter_mut() {
+                walk_dialogue_expr_mut(arg, f);
+            }
+        }
+        Expr::Unop(_, _, inner) => walk_dialogue_expr_mut(inner, f),
+        Expr::Binop(_, _, l, r) => {
+            walk_dialogue_expr_mut(l, f);
+            walk_dialogue_expr_mut(r, f);
+        }
+        Expr::Value(_, _) | Expr::Var(_, _) | Expr::Ref(_, _) => {}
+    }
 }
 
 #[cfg(test)]
@@ -419,6 +745,7 @@ mod tests {
     use ingert::scena::Scena;
     use ingert::scena::Stmt;
     use ingert::scena::Value;
+    use ingert::scp::Op;
 
     fn iv(n: i32) -> Expr {
         Expr::Value(None, Value::Int(n))
@@ -1049,11 +1376,10 @@ mod tests {
 
     #[test]
     fn asm_body_substituted_when_xseed_is_tree_and_no_voice_ids() {
-        // mp3010_01 QS300_01_00 case: EVO body is Asm (ingert couldn't
-        // decompile to Tree) but Xseed body is Tree and EVO's calls-table
-        // has no voice IDs. The swap layer should clone Xseed's body into
-        // EVO so the runtime executes Xseed text rather than GungHo text
-        // embedded in EVO's asm bytecode.
+        // EVO body is Asm (ingert couldn't decompile to Tree) but Xseed body
+        // is Tree, and the asm carries no voice cues. The swap layer clones
+        // Xseed's body into EVO so the runtime executes Xseed text rather than
+        // the GungHo text embedded in EVO's asm bytecode. Nothing to re-inject.
         let evo_fn = Function {
             args: Vec::new(),
             called: Called::Raw(Vec::new()),
@@ -1066,45 +1392,103 @@ mod tests {
         let xseed = make_scena("F", xseed_fn);
         let stats = swap_scena(&mut evo, &xseed);
         assert_eq!(stats.body_substitutions, 1);
+        assert_eq!(stats.voice_ids_reinjected, 0);
         assert_eq!(stats.body_subs.len(), 1);
         assert_eq!(stats.body_subs[0].function, "F");
         assert_eq!(stats.body_subs[0].evo_body_kind, "asm");
+        assert_eq!(stats.body_subs[0].voice_ids_reinjected, 0);
         let Body::Tree(body) = &evo.functions["F"].body else {
             unreachable!("body should have been substituted to Tree")
         };
         assert_eq!(body, &xseed_body);
+        // The called-table is adopted from Xseed too, so ingert re-infers it
+        // from the substituted body instead of keeping EVO's asm-derived table
+        // (which would disagree with the body and hang the engine).
+        assert_eq!(evo.functions["F"].called, Called::Merged(false));
     }
 
     #[test]
-    fn asm_body_not_substituted_when_evo_has_voice_ids() {
-        // If EVO's calls-table reveals any voice-ID upgrade in this function,
-        // substituting Xseed's body would silently drop EVO's contribution.
-        // Skip the substitution and leave EVO's asm body alone.
-        use ingert::scp::Call;
-        use ingert::scp::CallArg;
-        use ingert::scp::CallKind;
-        use ingert::scp::Value as ScpValue;
+    fn asm_body_voice_ids_reinjected_into_substituted_tree() {
+        // mp3010_01 QS300_01_00 case: EVO's Asm body carries voice cues that
+        // exist only in the bytecode (not the calls-table). Cloning Xseed's
+        // voiceless Tree must not drop them — the swap recovers each `11, V`
+        // pair from the asm and re-injects it into the clone at the same
+        // position, yielding Xseed text with EVO voice.
+        //
+        // Asm for `system[5,0](0, 11, 60589, "<#E_0>", "GungHo")`: args are
+        // pushed in reverse, char_id last, right before the CallSystem.
+        let asm = vec![
+            Op::Push(Value::String("GungHo".into())),
+            Op::Push(Value::String("<#E_0>".into())),
+            Op::Push(Value::Int(60589)),
+            Op::Push(Value::Int(11)),
+            Op::Push(Value::Int(0)),
+            Op::CallSystem(5, 0, 5),
+            Op::Pop(5),
+        ];
         let evo_fn = Function {
             args: Vec::new(),
-            called: Called::Raw(vec![Call {
-                kind: CallKind::Syscall(5, 0),
-                args: vec![
-                    CallArg::Value(ScpValue::Int(0)),
-                    CallArg::Value(ScpValue::Int(11)),
-                    CallArg::Value(ScpValue::Int(60589)),
-                    CallArg::Value(ScpValue::String("<#E_0>".into())),
-                    CallArg::Value(ScpValue::String("EVO voiced".into())),
-                ],
-            }]),
+            called: Called::Raw(Vec::new()),
             is_prelude: false,
-            body: Body::Asm(Vec::new()),
+            body: Body::Asm(asm),
         };
         let xseed_fn = make_fn(vec![Stmt::Expr(portrait_call(0, "<#E_0>", "XSEED"))]);
         let mut evo = make_scena("F", evo_fn);
         let xseed = make_scena("F", xseed_fn);
         let stats = swap_scena(&mut evo, &xseed);
+        assert_eq!(stats.body_substitutions, 1);
+        assert_eq!(stats.voice_ids_reinjected, 1);
+        assert_eq!(stats.body_subs[0].voice_ids_reinjected, 1);
+        let Body::Tree(body) = &evo.functions["F"].body else {
+            unreachable!("body should have been substituted to Tree")
+        };
+        // Xseed text ("XSEED") with EVO voice (11, 60589) restored in place.
+        assert_eq!(
+            body,
+            &vec![Stmt::Expr(portrait_call_voiced(
+                0, 60589, "<#E_0>", "XSEED"
+            ))]
+        );
+        // Called-table adopted from Xseed; voice lives only in the body, so the
+        // re-inferred table stays consistent with the code (see adopt_xseed_body).
+        assert_eq!(evo.functions["F"].called, Called::Merged(false));
+    }
+
+    #[test]
+    fn asm_body_left_alone_when_voice_present_but_calls_misalign() {
+        // Safety fallback: the asm carries a voice cue but the dialogue-call
+        // counts between EVO's asm and Xseed's tree don't match, so positional
+        // injection could misplace it. Leave EVO's asm body untouched rather
+        // than drop or misassign audio.
+        let asm = vec![
+            Op::Push(Value::String("GungHo".into())),
+            Op::Push(Value::String("<#E_0>".into())),
+            Op::Push(Value::Int(60589)),
+            Op::Push(Value::Int(11)),
+            Op::Push(Value::Int(0)),
+            Op::CallSystem(5, 0, 5),
+            Op::Pop(5),
+        ];
+        let evo_fn = Function {
+            args: Vec::new(),
+            called: Called::Raw(Vec::new()),
+            is_prelude: false,
+            body: Body::Asm(asm),
+        };
+        // Xseed tree has two dialogue calls vs the asm's one — a count mismatch.
+        let xseed_fn = make_fn(vec![
+            Stmt::Expr(portrait_call(0, "<#E_0>", "XSEED one")),
+            Stmt::Expr(portrait_call(0, "<#E_0>", "XSEED two")),
+        ]);
+        let mut evo = make_scena("F", evo_fn);
+        let xseed = make_scena("F", xseed_fn);
+        let stats = swap_scena(&mut evo, &xseed);
         assert_eq!(stats.body_substitutions, 0);
+        assert_eq!(stats.voice_ids_reinjected, 0);
         assert!(matches!(&evo.functions["F"].body, Body::Asm(_)));
+        // No substitution, so EVO's called-table is kept as-is — it stays
+        // consistent with EVO's own asm body that we left in place.
+        assert!(matches!(&evo.functions["F"].called, Called::Raw(_)));
     }
 
     fn mapname_call(name: &str) -> Expr {

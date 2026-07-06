@@ -410,9 +410,11 @@ fn evo_letter_to_voiced_upgrade_swapped_via_fallback() {
 // while preserving voice ID 97064.
 //
 // QS300_01_00 has Body::Asm in EVO (ingert couldn't decompile it to Tree)
-// but Body::Tree in Xseed. Since EVO added no voice IDs in this function,
-// the merge substitutes Xseed's Tree body so the runtime executes Xseed
-// text rather than GungHo text from EVO's asm bytecode.
+// but Body::Tree in Xseed. The merge substitutes Xseed's Tree body so the
+// runtime executes Xseed text rather than GungHo text from EVO's asm
+// bytecode. EVO added voice cues inside that asm body (not the calls-table),
+// so the merge recovers each `11, V` pair from the bytecode and re-injects it
+// into the clone — the substituted scene keeps Xseed's text AND EVO's voice.
 
 #[test]
 fn mp3010_01_voiced_plain_song_lyric_swapped() {
@@ -454,8 +456,18 @@ fn mp3010_01_asm_body_substituted() {
         .find(|e| e.function == "QS300_01_00")
         .expect("QS300_01_00 should be in body_subs");
     assert_eq!(sub.evo_body_kind, "asm");
-    // After substitution, the body should print without asm syntax and the
-    // GungHo text should be gone in favour of Xseed's body.
+    // EVO voiced this cutscene inside the asm body; every cue must be recovered
+    // and re-injected, not dropped.
+    assert!(
+        sub.voice_ids_reinjected > 0,
+        "expected EVO voice cues to be re-injected into the substituted body"
+    );
+    assert_eq!(
+        stats.voice_ids_reinjected, sub.voice_ids_reinjected,
+        "the only body substitution accounts for all re-injected voice IDs"
+    );
+    // After substitution, the body should print without asm syntax, carry
+    // Xseed's text, and keep EVO's voice cues.
     let out = print_ing(&evo);
     let fn_start = out
         .find("fn QS300_01_00")
@@ -467,6 +479,15 @@ fn mp3010_01_asm_body_substituted() {
     assert!(
         !fn_body.contains(" asm {"),
         "asm body should have been replaced with tree body"
+    );
+    // Xseed text (the completion line) and an EVO voice cue both present.
+    assert!(
+        fn_body.contains("All of the books have been returned!"),
+        "Xseed completion text should be present in the substituted body"
+    );
+    assert!(
+        fn_body.contains("11, 78898,"),
+        "EVO voice cue 78898 should be re-injected into the substituted body"
     );
 }
 

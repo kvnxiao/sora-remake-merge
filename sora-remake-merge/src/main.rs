@@ -149,13 +149,14 @@ fn run_dir(
     println!(
         "Swaps: {applied} applied, {noops} no-ops, {unmatched} unmatched, \
          {overflow} overflow, {fallback} voiced→letter fallbacks, \
-         {subs} body substitutions",
+         {subs} body substitutions ({reinjected} voice IDs re-injected)",
         applied = total.swaps_applied,
         noops = total.no_ops_equal,
         unmatched = total.unmatched_evo_calls,
         overflow = total.overflow_reuses,
         fallback = total.voiced_to_letter_fallback,
         subs = total.body_substitutions,
+        reinjected = total.voice_ids_reinjected,
     );
     if dry_run {
         println!("(dry run; nothing written)");
@@ -217,13 +218,14 @@ fn write_audit(
     std::fs::write(&overflow_path, overflow_tsv)
         .with_context(|| format!("failed to write {}", overflow_path.display()))?;
 
-    let mut body_subs_tsv = String::from("file\tfunction\tevo_body_kind\n");
+    let mut body_subs_tsv = String::from("file\tfunction\tevo_body_kind\tvoice_ids_reinjected\n");
     for (file, e) in body_subs {
         writeln!(
             body_subs_tsv,
-            "{file}\t{fn_name}\t{kind}",
+            "{file}\t{fn_name}\t{kind}\t{reinjected}",
             fn_name = tsv_escape(&e.function),
             kind = e.evo_body_kind,
+            reinjected = e.voice_ids_reinjected,
         )
         .context("write to in-memory String")?;
     }
