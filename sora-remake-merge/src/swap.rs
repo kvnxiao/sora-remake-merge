@@ -481,7 +481,8 @@ fn substitute_body(name: &str, evo: &mut Function, xseed: &Function, stats: &mut
 /// which the engine mis-reads and hangs on. Adopting Xseed's `Called::Merged`
 /// makes ingert re-infer the table from the (now Xseed) body at compile time,
 /// so it is always consistent. Voice IDs re-injected afterward live only in the
-/// body, mirroring how EVO ships voiced calls (voice in the body, not the table).
+/// body, mirroring how EVO ships voiced calls (voice in the body, not the
+/// table).
 fn adopt_xseed_body(evo: &mut Function, xseed: &Function) {
     evo.body = xseed.body.clone();
     evo.called = xseed.called.clone();
