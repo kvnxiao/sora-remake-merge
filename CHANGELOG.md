@@ -4,6 +4,21 @@ All notable changes to **sora-remake-merge**. The mod lays [Xseed Restoration](h
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions use [Semantic Versioning](https://semver.org/spec/v2.0.0.html). "In-game changes" are what a player sees differ in the game; "Tooling & internals" cover the merge tool itself.
 
+## [1.4.0] - 2026-07-06 (targets Xseed Restoration v1.8.1)
+
+Bug-fix release for the "Temp Librarian" quest scene in the Central Factory Archives. No Xseed version change from v1.3.0 — keep Xseed Restoration v1.8.1 installed.
+
+### In-game changes
+
+- **Fixed: talking to Constance in the Central Factory Archives ("Temp Librarian" quest) no longer freezes the game on an infinite loading screen.** The scene's completion cutscene (`mp3010_01.ing:QS300_01_00`) is the one function EVO ships as un-decompilable bytecode, and the special handling that lays Xseed's text over it emitted a scene script whose internal call table disagreed with its code — which the engine hangs on when loading the scene. The table is now rebuilt to match the code. This freeze affected the scene in every prior release.
+- **The same cutscene regains its EVO voice acting.** The earlier handling cloned Xseed's voiceless body and dropped every EVO voice cue in the scene; the merge now recovers those cues from EVO's bytecode and re-injects them, so the cutscene plays with Xseed's wording *and* EVO's voice.
+
+### Tooling & internals
+
+- **`Body::Asm` substitution now adopts Xseed's called-table alongside its body.** The substitution replaced only the body, leaving EVO's asm-derived `Called::Raw` table in place. Ingert's `compile` writes a `Called::Raw` table to the `.dat` verbatim with no check against the code (the reconcile pass runs only at decompile time), so EVO's table paired with Xseed's substituted body diverged (e.g. `camera_lookat` arg counts) and produced a scene the engine hung on. The swap now takes Xseed's `Called::Merged` too (`adopt_xseed_body`), so ingert re-infers a table that matches the substituted body. `QS300_01_00` is the corpus's only `Body::Asm` function, so it is the only one affected.
+- **`Body::Asm` substitution preserves EVO's body voice cues.** The gate previously read only the calls-table (`evo_calls_have_voice_ids`), which misses voice IDs EVO adds in the bytecode body but not the metadata — exactly `QS300_01_00`'s case. The swap now parses the asm to recover each dialogue call's `11, V` pair, clones Xseed's `Tree`, and re-injects the pairs at their original positions (gated on the dialogue-call counts matching so a cue can't be misplaced; it falls back to the calls-table gate if the asm can't be parsed). `body_substitutions.tsv` gains a `voice_ids_reinjected` column and the run summary reports the count. New unit and e2e tests cover recovery, re-injection, the called-table adoption, and the misalignment fallback; `verify-delta` still reports zero violations.
+- **`just bundle` now runs the full pipeline before zipping.** It depends on `all` (`merge` → `ing2dat`), so the release zip can never ship a stale `.dat` — the earlier voice fix appeared not to work precisely because a plain `just bundle` re-zipped stale `.dat` files. `just bundle-only` re-zips the existing `output/**/*.dat` without rebuilding.
+
 ## [1.3.0] - 2026-07-03 (targets Xseed Restoration v1.8)
 
 Updates the merge to Xseed Restoration **v1.8** (from v1.7). Install Xseed Restoration v1.8 with this build; pairing it with an older version leaves the new text desynced. v1.8 is the mod author's broadest re-translation pass yet, and the existing anchors absorb it with no merge-tool changes.
@@ -72,6 +87,7 @@ Initial release: the core EVO ↔ Xseed text merge.
 - Handling for EVO's structural divergences from the GungHo baseline: voice-ID insertions, `[5,8]` Letter→Voiced and Plain→VoicedPlain anchor-shape upgrades (via positional fallback), and `Body::Asm` body substitution.
 - Per-run audit logs (`unmatched.tsv`, `overflow.tsv`, `body_substitutions.tsv`) and the `compare-original` / `compare-xseed` analysis binaries.
 
+[1.4.0]: https://github.com/kvnxiao/sora-remake-merge/releases/tag/v1.4.0
 [1.3.0]: https://github.com/kvnxiao/sora-remake-merge/releases/tag/v1.3.0
 [1.2.0]: https://github.com/kvnxiao/sora-remake-merge/releases/tag/v1.2.0
 [1.1.0]: https://github.com/kvnxiao/sora-remake-merge/releases/tag/v1.1.0
